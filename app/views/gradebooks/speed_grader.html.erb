@@ -9,7 +9,7 @@
   })
   @show_left_side = false
   @show_embedded_chat = false
-  @body_classes << 'full-width'
+  @body_classes << 'ic-no-flex-layout full-width'
   @can_edit_anything = !@context.completed?
 %>
 <% content_for :page_title, t(:page_title, "%{assignment_name}, SpeedGrader, %{course_name}", :assignment_name => @assignment.title, :course_name => @context.name) %>
@@ -37,6 +37,12 @@
       </div>
     </div>
     <div class="right">
+      <div class="left">
+        <button id="keyboard-shortcut-info-icon" class="Button Button--icon-action-rev" type="button">
+          <span class="screenreader-only"><%= t('Keyboard Shortcuts') %></span>
+          <i class="icon-info"></i>
+        </button>
+      </div>
       <a data-muted="<%= @assignment.muted? ? "true" : "false" %>" id="mute_link" href="#"><span class="ui-icon ui-icon-volume-<%= @assignment.muted? ? "on" : "off" %>"></span><span class=mute_label><%= @assignment.muted? ? t("gradebook.unmute_assignment", "Unmute Assignment") : t("gradebook.mute_assignment", "Mute Assignment") %></span></a>
       <a id="settings_link" href="#"><span class="ui-icon ui-icon-wrench"></span><%= t('links.settings', "Settings") %></a>
       <% if help_link %>
@@ -54,8 +60,48 @@
     </div>
   <% end %>
 </div></div>
-
-<div id="full_width_container" style="display:none;">
+<div id="moderation_bar">
+  <div id="moderation_bar_content">
+    <div id="moderation_tabs" class="ui-tabs-minimal">
+      <ul>
+        <li data-pg-index="0"><a href="#dummy_container">
+          <span class="mark_title"><%= t('1st Reviewer') %></span>
+          <span class="mark_grade"></span>
+        </a></li>
+        <li data-pg-index="1"><a href="#dummy_container">
+          <span class="mark_title"><%= t('2nd Reviewer') %></span>
+          <span class="mark_grade"></span>
+        </a></li>
+        <li data-pg-index="final"><a href="#dummy_container">
+          <span class="mark_title"><%= t('Moderator') %></span>
+          <span class="mark_grade"></span>
+        </a></li>
+      </ul>
+      <div id="dummy_container"></div>
+    </div>
+    <div id="new_mark_container">
+      <a id="new_mark_dropdown_link" href="#dummy_container" class="al-trigger" data-popup-within="#full_width_container" tabindex="0">
+        <%= t('Add Review') %>
+        <i class="icon-mini-arrow-down"></i>
+      </a>
+      <ul id="new_mark_dropdown" class="al-options" role="menu" tabindex="0" aria-hidden="true" aria-expanded="false" aria-activedescendant="new_mark_dropdown_link1">
+        <li role="presentation">
+          <a href="#" id="new_mark_link" tabindex="-1" role="menuitem"><%= t('Add 2nd Review') %></a>
+        </li>
+        <li role="presentation">
+          <a href="#" id="new_mark_final_link" tabindex="-1" role="menuitem"><%= t('Add Moderator Review (New)') %></a>
+        </li>
+        <li role="presentation">
+          <a href="#" id="new_mark_copy_link1" tabindex="-1" role="menuitem"><%= t('Add Moderator Review (Copy 1st)') %></a>
+        </li>
+        <li role="presentation">
+          <a href="#" id="new_mark_copy_link2" tabindex="-1" role="menuitem"><%= t('Add Moderator Review (Copy 2nd)') %></a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+<div id="full_width_container" style="display:none">
   <div id="left_side" class="full_height">
     <div id="left_side_inner">
       <div id="no_annotation_warning" class="alert speedgrader_alert">
@@ -103,6 +149,7 @@
           <div id="multiple_submissions"></div>
           <div id="submission_late_notice"><%= t(:late_notice, "Note: This submission was LATE") %></div>
           <div id="submission_not_newest_notice" title='<%= t('titles.not_newest', "use the dropdown above to change which submission to look at") %>'><%= t(:not_newest_notice, "Note: This is not the most recent submission") %></div>
+          <div id="submission_attachment_viewed_at_container"></div>
           <div id="submission_files_container">
             <label><%= t(:submitted_files, "Submitted Files: (click to load)") %></label>
             <div id="submission_files_list">
@@ -178,7 +225,7 @@
                 <a href="javascript:void 0;" class="delete_comment_link icon-x">
                   <span class="screenreader-only"><%= t('icons.delete_comment', 'Delete comment') %></span>
                 </a>
-                <img src="#" class="avatar" alt="" style="display: none;"/>
+                <img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" class="avatar" alt="" style="display: none;"/>
                 <span class="comment"></span>
                 <a href="#" class="play_comment_link media-comment" style="display:none;"><%= t('links.click_to_view', "click here to view") %></a>
                 <div class="media_comment_content" style="display:none"></div>
@@ -235,7 +282,7 @@
                   </button>
                 <% end %>
               </div>
-              <div style="display:none">
+              <div class="speech-recognition" style="display:none">
                 <a data-tooltip title="<%= t('tooltips.speech_recognition', "Speech Recognition") %>" href="#" class="btn btn-small speech_recognition_link">
                   <i class="icon-audio"></i>
                   <span class="screenreader-only">

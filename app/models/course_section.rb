@@ -22,23 +22,16 @@ class CourseSection < ActiveRecord::Base
   attr_protected :sis_source_id, :sis_batch_id, :course_id,
       :root_account_id, :enrollment_term_id, :integration_id
 
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :sis_source_id, :sis_batch_id, :course_id, :root_account_id, :enrollment_term_id, :name, :default_section, :accepting_enrollments, :can_manually_enroll, :start_at,
-    :end_at, :created_at, :updated_at, :workflow_state, :restrict_enrollments_to_section_dates, :nonxlist_course_id
-  ]
-
-  EXPORTABLE_ASSOCIATIONS = [:course, :nonxlist_course, :root_account, :enrollments, :users, :calendar_events, :assignment_overrides]
-
   belongs_to :course
   belongs_to :nonxlist_course, :class_name => 'Course'
   belongs_to :root_account, :class_name => 'Account'
-  has_many :enrollments, preload: :user, conditions: ['enrollments.workflow_state != ?', 'deleted'], dependent: :destroy
+  has_many :enrollments, -> { preload(:user).where("enrollments.workflow_state<>'deleted'") }, dependent: :destroy
   has_many :all_enrollments, :class_name => 'Enrollment'
   has_many :students, :through => :student_enrollments, :source => :user
-  has_many :student_enrollments, class_name: 'StudentEnrollment', conditions: ['enrollments.workflow_state != ? AND enrollments.workflow_state != ? AND enrollments.workflow_state != ? AND enrollments.workflow_state != ?', 'deleted', 'completed', 'rejected', 'inactive'], preload: :user
-  has_many :all_student_enrollments, class_name: 'StudentEnrollment', conditions: ['enrollments.workflow_state != ?', 'deleted'], preload: :user
-  has_many :instructor_enrollments, :class_name => 'Enrollment', :conditions => "(enrollments.type = 'TaEnrollment' or enrollments.type = 'TeacherEnrollment')"
-  has_many :admin_enrollments, :class_name => 'Enrollment', :conditions => "(enrollments.type = 'TaEnrollment' or enrollments.type = 'TeacherEnrollment' or enrollments.type = 'DesignerEnrollment')"
+  has_many :student_enrollments, -> { where("enrollments.workflow_state NOT IN ('deleted', 'completed', 'rejected', 'inactive')").preload(:user) }, class_name: 'StudentEnrollment'
+  has_many :all_student_enrollments, -> { where("enrollments.workflow_state<>'deleted'").preload(:user) }, class_name: 'StudentEnrollment'
+  has_many :instructor_enrollments, -> { where(type: ['TaEnrollment', 'TeacherEnrollment']) }, class_name: 'Enrollment'
+  has_many :admin_enrollments, -> { where(type: ['TaEnrollment', 'TeacherEnrollment', 'DesignerEnrollment']) }, class_name: 'Enrollment'
   has_many :users, :through => :enrollments
   has_many :course_account_associations
   has_many :calendar_events, :as => :context
@@ -72,6 +65,10 @@ class CourseSection < ActiveRecord::Base
     end
   end
 
+  def participating_observers
+    User.observing_students_in_course(participating_students.map(&:id), course.id)
+  end
+
   def participating_students
     course.participating_students.where(:enrollments => { :course_section_id => self })
   end
@@ -80,8 +77,10 @@ class CourseSection < ActiveRecord::Base
     course.participating_admins.where("enrollments.course_section_id = ? OR NOT COALESCE(enrollments.limit_privileges_to_course_section, ?)", self, false)
   end
 
-  def participants
-    participating_students + participating_admins
+  def participants(include_observers=false)
+    ps = participating_students + participating_admins
+    ps += participating_observers if include_observers
+    ps
   end
 
   def available?
@@ -99,8 +98,8 @@ class CourseSection < ActiveRecord::Base
 
   def touch_all_enrollments
     return if new_record?
-    self.enrollments.update_all(:updated_at => Time.now.utc)
-    User.where("id IN (SELECT user_id FROM enrollments WHERE course_section_id=?)", self).
+    self.enrollments.touch_all
+    User.where(id: all_enrollments.select(:user_id)).
         update_all(updated_at: Time.now.utc)
   end
 
@@ -119,7 +118,7 @@ class CourseSection < ActiveRecord::Base
 
     given { |user, session|
       user &&
-      self.course.sections_visible_to(user).scoped.where(:id => self).exists? &&
+      self.course.sections_visible_to(user).where(:id => self).exists? &&
       self.course.grants_right?(user, session, :read_roster)
     }
     can :read
@@ -257,7 +256,7 @@ class CourseSection < ActiveRecord::Base
     state :deleted
   end
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = 'deleted'
     self.enrollments.not_fake.each(&:destroy)

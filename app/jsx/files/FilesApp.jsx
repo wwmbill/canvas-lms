@@ -1,17 +1,51 @@
 define([
+  'jquery',
   'react',
-  'react-router',
   'react-modal',
+  'page',
   'compiled/react_files/components/FilesApp',
   'compiled/react_files/modules/filesEnv',
   'i18n!react_files',
   'jsx/files/Breadcrumbs',
   'jsx/files/FolderTree',
   'jsx/files/FilesUsage',
-  'compiled/react_files/components/Toolbar'
-], function (React, ReactRouter, ReactModal, FilesApp, filesEnv, I18n, Breadcrumbs, FolderTree, FilesUsage, Toolbar) {
+  'jsx/files/Toolbar'
+], function ($, React, ReactModal, page, FilesApp, filesEnv, I18n, Breadcrumbs, FolderTree, FilesUsage, Toolbar) {
 
-  var RouteHandler = ReactRouter.RouteHandler;
+  const modalOverrides = {
+    overlay : {
+      backgroundColor: 'rgba(0,0,0,0.5)'
+    },
+    content : {
+      position: 'static',
+      top: '0',
+      left: '0',
+      right: 'auto',
+      bottom: 'auto',
+      borderRadius: '0',
+      border: 'none',
+      padding: '0'
+    }
+  };
+
+  FilesApp.previewItem = function (item) {
+    this.clearSelectedItems(() => {
+      this.toggleItemSelected(item, null, () => {
+        const queryString = $.param(this.getPreviewQuery());
+        page(`${this.getPreviewRoute()}?${queryString}`);
+      });
+    });
+  };
+
+  FilesApp.getPreviewRoute = function () {
+    if (this.props.query && this.props.query.search_term) {
+      return '/search';
+    } else if (this.props.splat) {
+      return `/folder/${this.props.splat}`;
+    } else {
+      return '';
+    }
+  };
 
   FilesApp.render = function () {
     var contextType;
@@ -42,8 +76,8 @@ define([
             {I18n.t('Files')}
           </h1>
         </header>
-        {ENV.use_new_styles && contextType === 'courses' && (
-          <div className='ic-app-nav-toggle-and-crumbs ic-app-nav-toggle-and-crumbs--files'>
+        {ENV.use_new_styles && (
+          <div className='ic-app-nav-toggle-and-crumbs ic-app-nav-toggle-and-crumbs--files no-print'>
             <button
               className='Button Button--link Button--small ic-app-course-nav-toggle'
               type='button'
@@ -57,22 +91,27 @@ define([
               <Breadcrumbs
                 rootTillCurrentFolder={this.state.rootTillCurrentFolder}
                 showingSearchResults={this.state.showingSearchResults}
+                query={this.props.query}
+                contextAssetString={this.props.contextAssetString}
               />
             </div>
           </div>
         )}
 
-        {(!ENV.use_new_styles || contextType !== 'courses') && (
+        {(!ENV.use_new_styles) && (
           <Breadcrumbs
             rootTillCurrentFolder={this.state.rootTillCurrentFolder}
             showingSearchResults={this.state.showingSearchResults}
+            query={this.props.query}
+            contextAssetString={this.props.contextAssetString}
           />
         )}
         <Toolbar
           currentFolder={this.state.currentFolder}
-          query={this.getQuery()}
+          query={this.props.query}
           selectedItems={this.state.selectedItems}
           clearSelectedItems={this.clearSelectedItems}
+          onMove={this.onMove}
           contextType={contextType}
           contextId={contextId}
           userCanManageFilesForContext={userCanManageFilesForContext}
@@ -110,34 +149,37 @@ define([
             role='region'
             aria-label={I18n.t('File List')}
           >
-            <RouteHandler
-              key={this.state.key}
-              pathname={this.state.pathname}
-              query={this.getQuery()}
-              onResolvePath={this.onResolvePath}
-              currentFolder={this.state.currentFolder}
-              contextType={contextType}
-              contextId={contextId}
-              selectedItems={this.state.selectedItems}
-              toggleItemSelected={this.toggleItemSelected}
-              toggleAllSelected={this.toggleAllSelected}
-              areAllItemsSelected={this.areAllItemsSelected}
-              userCanManageFilesForContext={userCanManageFilesForContext}
-              usageRightsRequiredForContext={usageRightsRequiredForContext}
-              externalToolsForContext={externalToolsForContext}
-              previewItem={this.previewItem}
-              modalOptions={{
+            {React.cloneElement(this.props.children, {
+              key: this.state.key,
+              pathname: this.props.pathname,
+              splat: this.props.splat,
+              query: this.props.query,
+              params: this.props.params,
+              onResolvePath: this.onResolvePath,
+              currentFolder: this.state.currentFolder,
+              contextType: contextType,
+              contextId: contextId,
+              selectedItems: this.state.selectedItems,
+              toggleItemSelected: this.toggleItemSelected,
+              toggleAllSelected: this.toggleAllSelected,
+              areAllItemsSelected: this.areAllItemsSelected,
+              userCanManageFilesForContext: userCanManageFilesForContext,
+              usageRightsRequiredForContext: usageRightsRequiredForContext,
+              externalToolsForContext: externalToolsForContext,
+              previewItem: this.previewItem,
+              onMove: this.onMove,
+              modalOptions: {
                 openModal: this.openModal,
                 closeModal: this.closeModal
-              }}
-              dndOptions={{
+              },
+              dndOptions: {
                 onItemDragStart: this.onItemDragStart,
                 onItemDragEnterOrOver: this.onItemDragEnterOrOver,
                 onItemDragLeaveOrEnd: this.onItemDragLeaveOrEnd,
                 onItemDrop: this.onItemDrop
-              }}
-              clearSelectedItems={this.clearSelectedItems}
-            />
+              },
+              clearSelectedItems: this.clearSelectedItems
+            })}
           </div>
         </div>
         <div className='ef-footer grid-row'>
@@ -165,6 +207,7 @@ define([
             closeTimeoutMS='10'
             className='ReactModal__Content--canvas'
             overlayClassName='ReactModal__Overlay--canvas'
+            style={modalOverrides}
           >
             {this.state.modalContents}
           </ReactModal>

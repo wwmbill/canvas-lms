@@ -17,12 +17,6 @@
 #
 class ContentTag < ActiveRecord::Base
   class LastLinkToOutcomeNotDestroyed < StandardError
-    attr_reader :alignment
-    def initialize( alignment )
-      super( 'Link is the last link to an aligned outcome.' +
-           'Remove the alignment and then try again')
-      @alignment = alignment
-    end
   end
 
   TABLED_CONTENT_TYPES = ['Attachment', 'Assignment', 'WikiPage', 'Quizzes::Quiz', 'LearningOutcome', 'DiscussionTopic',
@@ -34,23 +28,17 @@ class ContentTag < ActiveRecord::Base
   include SearchTermHelper
   belongs_to :content, :polymorphic => true
   validates_inclusion_of :content_type, :allow_nil => true, :in => CONTENT_TYPES
-  belongs_to :context, :polymorphic => true
-  validates_inclusion_of :context_type, :allow_nil => true, :in => ['Course', 'LearningOutcomeGroup',
-    'Assignment', 'Account', 'Quizzes::Quiz']
-  belongs_to :associated_asset, :polymorphic => true
-  validates_inclusion_of :associated_asset_type, :allow_nil => true, :in => ['LearningOutcomeGroup']
+  belongs_to :context, polymorphic:
+      [:course, :learning_outcome_group, :assignment, :account,
+       { quiz: 'Quizzes::Quiz' }]
+  belongs_to :associated_asset, polymorphic: [:learning_outcome_group],
+             polymorphic_prefix: true
   belongs_to :context_module
   belongs_to :learning_outcome
   # This allows doing a has_many_through relationship on ContentTags for linked LearningOutcomes. (see LearningOutcomeContext)
   belongs_to :learning_outcome_content, :class_name => 'LearningOutcome', :foreign_key => :content_id
   has_many :learning_outcome_results
 
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :content_id, :content_type, :context_id, :context_type, :title, :tag, :url, :created_at, :updated_at, :comments, :tag_type, :context_module_id, :position,
-    :indent, :learning_outcome_id, :context_code, :mastery_score, :rubric_association_id, :workflow_state, :cloned_item_id, :associated_asset_id, :associated_asset_type, :new_tab
-  ]
-
-  EXPORTABLE_ASSOCIATIONS = [:content, :context, :associated_asset, :context_module, :learning_outcome, :learning_outcome_results, :learning_outcome_content]
   # This allows bypassing loading context for validation if we have
   # context_id and context_type set, but still allows validating when
   # context is not yet saved.
@@ -63,9 +51,6 @@ class ContentTag < ActiveRecord::Base
   after_save :touch_context_if_learning_outcome
   include CustomValidations
   validates_as_url :url
-
-  include PolymorphicTypeOverride
-  override_polymorphic_types content_type: {'Quiz' => 'Quizzes::Quiz'}
 
   acts_as_list :scope => :context_module
 
@@ -98,7 +83,7 @@ class ContentTag < ActiveRecord::Base
   end
 
   def touch_context_module_after_transaction
-    connection.after_transaction_commit {
+    self.class.connection.after_transaction_commit {
       touch_context_module
     }
   end
@@ -110,10 +95,7 @@ class ContentTag < ActiveRecord::Base
     elsif ids.empty?
       # do nothing
     else
-      ContextModule.transaction do
-        ContextModule.where(id: ids).order(:id).lock.pluck(:id)
-        ContextModule.where(id: ids).update_all(updated_at: Time.now.utc)
-      end
+      ContextModule.where(id: ids).touch_all
     end
     true
   end
@@ -155,6 +137,8 @@ class ContentTag < ActiveRecord::Base
     end
     content_ids.each do |type, ids|
       klass = type.constantize
+      next unless klass < ActiveRecord::Base
+      next if klass.respond_to?(:tableless?) && klass.tableless?
       if klass.new.respond_to?(:could_be_locked=)
         klass.where(:id => ids).update_all(:could_be_locked => true)
       end
@@ -280,12 +264,13 @@ class ContentTag < ActiveRecord::Base
     return unless self.asset_context_matches?
     return unless self.content && self.content.respond_to?(:publish!)
 
+    # update the asset and also update _other_ content tags that point at it
     if self.unpublished? && self.content.published? && self.content.can_unpublish?
       self.content.unpublish!
-      self.class.update_for(self.content)
+      self.class.update_for(self.content, exclude_tag: self)
     elsif self.active? && !self.content.published?
       self.content.publish!
-      self.class.update_for(self.content)
+      self.class.update_for(self.content, exclude_tag: self)
     end
   end
 
@@ -294,8 +279,7 @@ class ContentTag < ActiveRecord::Base
     ContentTag.where(context_id: asset, context_type: asset.class.to_s).each{|t| t.destroy }
   end
 
-  alias_method :destroy!, :destroy
-  def destroy
+  def can_destroy?
     # if it's a learning outcome link...
     if self.tag_type == 'learning_outcome_association'
       # and there are no other links to the same outcome in the same context...
@@ -308,14 +292,26 @@ class ContentTag < ActiveRecord::Base
         # foreign links, in any context for native links)
         alignment_conditions = { :learning_outcome_id => outcome.id }
         native = outcome.context_type == self.context_type && outcome.context_id == self.context_id
-        if !native
+        if native
+          @should_destroy_outcome = true
+        else
           alignment_conditions[:context_id] = self.context_id
           alignment_conditions[:context_type] = self.context_type
         end
-        alignment = ContentTag.learning_outcome_alignments.active.where(alignment_conditions).first
-        # then don't let them delete the link
-        raise LastLinkToOutcomeNotDestroyed.new(alignment) if alignment
+
+        if ContentTag.learning_outcome_alignments.active.where(alignment_conditions).exists?
+          # then don't let them delete the link
+          return false
+        end
       end
+    end
+    true
+  end
+
+  alias_method :destroy_permanently!, :destroy
+  def destroy
+    unless can_destroy?
+      raise LastLinkToOutcomeNotDestroyed.new('Link is the last link to an aligned outcome. Remove the alignment and then try again')
     end
 
     context_module.remove_completion_requirement(id) if context_module
@@ -327,8 +323,8 @@ class ContentTag < ActiveRecord::Base
     # outcome. we do this here instead of in LearningOutcome#destroy because
     # (a) LearningOutcome#destroy *should* only ever be called from here, and
     # (b) we've already determined other_link and native
-    if self.tag_type == 'learning_outcome_association' && !other_link && native
-      outcome.destroy
+    if @should_destroy_outcome
+      self.content.destroy
     end
 
     true
@@ -343,8 +339,11 @@ class ContentTag < ActiveRecord::Base
     self.context_module.available_for?(user, opts.merge({:tag => self}))
   end
 
-  def self.update_for(asset)
-    tags = ContentTag.where(:content_id => asset, :content_type => asset.class.to_s).not_deleted.select([:id, :tag_type, :content_type, :context_module_id]).to_a
+  def self.update_for(asset, exclude_tag: nil)
+    tags = ContentTag.where(:content_id => asset, :content_type => asset.class.to_s).not_deleted
+    tags = tags.where('content_tags.id<>?', exclude_tag.id) if exclude_tag
+    tags = tags.select([:id, :tag_type, :content_type, :context_module_id]).to_a
+    return if tags.empty?
     module_ids = tags.map(&:context_module_id).compact
 
     # update title
@@ -499,8 +498,9 @@ class ContentTag < ActiveRecord::Base
 
     opts ||= self.context_module.visibility_for_user(user)
     return false unless opts[:can_read]
-    return false unless self.published? || opts[:can_read_as_admin]
-    return true unless opts[:differentiated_assignments]
+
+    return true if opts[:can_read_as_admin]
+    return false unless self.published?
 
     if self.assignment
       self.assignment.visible_to_user?(user, opts)

@@ -3,6 +3,8 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/groups_common')
 
 describe "student groups" do
   include_context "in-process server selenium tests"
+  include GroupsCommon
+
   let(:group_name){ 'Windfury' }
   let(:group_category_name){ 'cat1' }
 
@@ -32,7 +34,7 @@ describe "student groups" do
         wait_for_ajaximations
       end
 
-      expect(g1.reload.name).to eq "new group name"
+      expect(g1.reload.name).to include_text("new group name")
     end
 
     it "should show locked student organized, invite only groups", priority: "1", test_id: 180671 do
@@ -40,6 +42,16 @@ describe "student groups" do
       get "/courses/#{@course.id}/groups"
 
       expect(f(".icon-lock")).to be_displayed
+    end
+
+    it "should restrict students from accessing groups in unpublished course", priority: "1", test_id: 246620 do
+      group_test_setup(1,1,1)
+      add_user_to_group(@students.first,@testgroup[0])
+      @course.workflow_state = 'unpublished'
+      @course.save!
+      user_session(@students.first)
+      get "/courses/#{@course.id}/groups"
+      expect(f("#unauthorized_message")).to be_displayed
     end
 
     describe "new student group" do

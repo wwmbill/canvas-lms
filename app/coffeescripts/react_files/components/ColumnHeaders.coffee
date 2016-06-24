@@ -3,12 +3,8 @@ define [
   'underscore'
   'react'
   'react-router'
-  'compiled/react/shared/utils/withReactElement'
   'compiled/fn/preventDefault'
-], (I18n, _, React, ReactRouter, withReactElement, preventDefault) ->
-
-  classSet = React.addons.classSet
-  Link = React.createFactory ReactRouter.Link
+], (I18n, _, React, ReactRouter, preventDefault) ->
 
   columns = [
     displayName: I18n.t('name', 'Name')
@@ -44,14 +40,9 @@ define [
     columns: columns
 
     propTypes:
-      to: React.PropTypes.string.isRequired
       query: React.PropTypes.object.isRequired
-      params: React.PropTypes.object.isRequired
       toggleAllSelected: React.PropTypes.func.isRequired
       areAllItemsSelected: React.PropTypes.func.isRequired
-      splat: React.PropTypes.string
-
-    mixins: [ReactRouter.State]
 
     getInitialState: ->
       return {

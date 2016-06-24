@@ -19,6 +19,7 @@ class BrandConfig < ActiveRecord::Base
           'save a new one and it will generate the new md5 for you'
   end
 
+  belongs_to :parent, class_name: 'BrandConfig', foreign_key: 'parent_md5'
   has_many :accounts, foreign_key: 'brand_config_md5'
 
   scope :without_k12, lambda { where("md5 != ?", BrandConfig.k12_config) }
@@ -60,7 +61,7 @@ class BrandConfig < ActiveRecord::Base
   end
 
   def get_value(variable_name)
-    self.variables[variable_name]
+    effective_variables[variable_name]
   end
 
   def overrides?
@@ -73,32 +74,13 @@ class BrandConfig < ActiveRecord::Base
   end
 
   def chain_of_ancestor_configs
-    @chain_of_ancestor_configs ||= begin
-      if ActiveRecord::Base.configurations[Rails.env]['adapter'] == 'postgresql'
-        sql_ancestor_config_chain
-      else
-        manual_ancestor_config_chain
-      end
+    @ancestor_configs ||= [self] + (parent && parent.chain_of_ancestor_configs).to_a
+  end
+
+  def save_unless_dup!
+    unless BrandConfig.where(md5: self.md5).exists?
+      self.save!
     end
-  end
-
-  def sql_ancestor_config_chain
-    ancestors = BrandConfig.find_by_sql(ActiveRecord::Base.send(:sanitize_sql_array, [<<-SQL, parent_md5]))
-      WITH RECURSIVE t AS (
-        SELECT * FROM #{BrandConfig.quoted_table_name} WHERE parent_md5=?
-        UNION
-        SELECT brand_configs.* FROM #{BrandConfig.quoted_table_name} INNER JOIN t ON brand_configs.md5=t.parent_md5
-      )
-      SELECT * FROM t
-    SQL
-    ([self] + ancestors).uniq
-  end
-
-  def manual_ancestor_config_chain
-    return [self] unless parent_md5
-    parent = BrandConfig.where(md5: parent_md5).first
-    return [self] unless parent
-    ([self] + parent.chain_of_ancestor_configs).flatten
   end
 
   def to_scss
@@ -114,12 +96,28 @@ class BrandConfig < ActiveRecord::Base
     scss_dir.join('_brand_variables.scss')
   end
 
+  def to_json
+    BrandableCSS.all_brand_variable_values(self).to_json
+  end
+
+  def json_file
+    public_brand_dir.join("variables-#{BrandableCSS.default_variables_md5}.json")
+  end
+
   def scss_dir
     BrandableCSS.branded_scss_folder.join(md5)
   end
 
+  def public_brand_dir
+    BrandableCSS.public_brandable_css_folder.join(md5)
+  end
+
   def public_folder
     "dist/brandable_css/#{md5}"
+  end
+
+  def public_json_path
+    "#{public_folder}/variables-#{BrandableCSS.default_variables_md5}.json"
   end
 
   def save_scss_file!
@@ -128,7 +126,29 @@ class BrandConfig < ActiveRecord::Base
     scss_file.write(to_scss)
   end
 
-  def remove_scss_file!
+  def save_json_file!
+    logger.info "saving brand variables file: #{json_file}"
+    public_brand_dir.mkpath
+    json_file.write(to_json)
+    move_json_to_s3_if_enabled!
+  end
+
+  def move_json_to_s3_if_enabled!
+    return unless Canvas::Cdn.enabled?
+    s3_uploader.upload_file(public_json_path)
+    File.delete(json_file)
+  end
+
+  def s3_uploader
+    @s3_uploaderer ||= Canvas::Cdn::S3Uploader.new
+  end
+
+  def save_all_files!
+    save_scss_file!
+    save_json_file!
+  end
+
+  def remove_scss_dir!
     return unless scss_dir.exist?
     logger.info "removing: #{scss_dir}"
     scss_dir.rmtree
@@ -136,6 +156,18 @@ class BrandConfig < ActiveRecord::Base
 
   def compile_css!(opts=nil)
     BrandableCSS.compile_brand!(md5, opts)
+  end
+
+  def css_and_js_overrides
+    Rails.cache.fetch([self, 'css_and_js_overrides']) do
+      chain_of_ancestor_configs.each_with_object({}) do |brand_config, includes|
+        BrandConfig::OVERRIDE_TYPES.each do |override_type|
+          if brand_config[override_type].present?
+            (includes[override_type] ||= []).unshift(brand_config[override_type])
+          end
+        end
+      end
+    end
   end
 
   def sync_to_s3_and_save_to_account!(progress, account_id)
@@ -149,7 +181,7 @@ class BrandConfig < ActiveRecord::Base
 
   def save_and_sync_to_s3!(progress=nil)
     progress.update_completion!(5) if progress
-    save_scss_file!
+    save_all_files!
     progress.update_completion!(10) if progress
     compile_css! on_progress: -> (percent_complete) {
       # send at most 1 UPDATE query per 2 seconds
@@ -169,7 +201,7 @@ class BrandConfig < ActiveRecord::Base
       first
     if unused_brand_config
       unused_brand_config.destroy
-      unused_brand_config.remove_scss_file!
+      unused_brand_config.remove_scss_dir!
     end
   end
 

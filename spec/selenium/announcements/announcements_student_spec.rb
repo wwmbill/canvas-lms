@@ -1,8 +1,9 @@
-require File.expand_path(File.dirname(__FILE__) + '/../common')
-require File.expand_path(File.dirname(__FILE__) + '/../helpers/announcements_common')
+require_relative '../common'
+require_relative '../helpers/announcements_common'
 
 describe "announcements" do
   include_context "in-process server selenium tests"
+  include AnnouncementsCommon
 
   it "should validate replies are not visible until after users post", priority: "1", test_id: 150533 do
     password = 'asdfasdf'
@@ -115,6 +116,37 @@ describe "announcements" do
         get "/"
         expect(ff('.title .count')).to eq([])
       end
+    end
+
+    it "allows rating when enabled", priority: "1", test_id: 603587 do
+      announcement = @course.announcements.create!(title: 'stuff', message: 'things', allow_rating: true)
+      get "/courses/#{@course.id}/discussion_topics/#{announcement.id}"
+
+      f('.discussion-reply-action').click
+      wait_for_ajaximations
+      type_in_tiny('textarea', 'stuff and things')
+      submit_form('.discussion-reply-form')
+      wait_for_ajaximations
+
+      expect(f('.discussion-rate-action')).to be_displayed
+
+      f('.discussion-rate-action').click
+      wait_for_ajaximations
+
+      expect(f('.discussion-rate-action--checked')).to be_displayed
+    end
+
+    it "doesn't allow rating when not enabled", priority: "1", test_id: 603588 do
+      announcement = @course.announcements.create!(title: 'stuff', message: 'things', allow_rating: false)
+      get "/courses/#{@course.id}/discussion_topics/#{announcement.id}"
+
+      f('.discussion-reply-action').click
+      wait_for_ajaximations
+      type_in_tiny('textarea', 'stuff and things')
+      submit_form('.discussion-reply-form')
+      wait_for_ajaximations
+
+      expect(f('.discussion-rate-action')).to be_nil
     end
   end
 end

@@ -4,9 +4,11 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/files_common')
 
 describe "discussion assignments" do
   include_context "in-process server selenium tests"
+  include DiscussionsCommon
+  include FilesCommon
+  include AssignmentsCommon
 
-
-  before (:each) do
+  before(:each) do
     @domain_root_account = Account.default
     course_with_teacher_logged_in
   end
@@ -74,6 +76,24 @@ describe "discussion assignments" do
       file.save!
       get "/courses/#{@course.id}/discussion_topics/#{topic.id}/edit"
       insert_file_from_rce(:discussion)
+    end
+  end
+
+  context "created by different users" do
+    it "should list identical authors after a user merge", priority: "2", test_id: 85899 do
+      @student_a = User.create!(:name => 'Student A')
+      @student_b = User.create!(:name => 'Student B')
+      discussion_a = @course.discussion_topics.create!(user: @student_a, title: 'title a', message: 'from student a')
+      discussion_b = @course.discussion_topics.create!(user: @student_b, title: 'title b', message: 'from student b')
+      discussion_b.discussion_entries.create!(user: @student_a, message: 'reply from student a')
+      discussion_a.discussion_entries.create!(user: @student_b, message: 'reply from student b')
+      UserMerge.from(@student_a).into(@student_b)
+      @student_a.reload
+      @student_b.reload
+      get "/courses/#{@course.id}/discussion_topics/#{discussion_a.id}"
+      expect(f("div .entry-content a.author").text).to eq "Student B"
+      get "/courses/#{@course.id}/discussion_topics/#{discussion_b.id}"
+      expect(f("div .discussion_subentries a.author").text).to eq "Student B"
     end
   end
 end

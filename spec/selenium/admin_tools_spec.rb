@@ -4,6 +4,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../cassandra_spec_helper')
 
 describe "admin_tools" do
   include_context "in-process server selenium tests"
+  include Calendar2Common
 
   def load_admin_tools_page
     get "/accounts/#{@account.id}/admin_tools"
@@ -208,7 +209,7 @@ describe "admin_tools" do
     end
 
     context "permissions" do
-      it "should includ options activity with permissions" do
+      it "should include options activity with permissions" do
         setup_account_admin
         load_admin_tools_page
         wait_for_ajaximations
@@ -223,8 +224,7 @@ describe "admin_tools" do
         expect(select).not_to be_nil
         expect(select).to be_displayed
 
-        options = ffj("#loggingType > option")
-        options.map!{ |o| o.text }
+        options = ffj("#loggingType > option").map(&:text).map(&:strip)
         expect(options).to include("Select a Log type")
         expect(options).to include("Login / Logout Activity")
         expect(options).to include("Grade Change Activity")
@@ -332,7 +332,7 @@ describe "admin_tools" do
         @submission = @assignment.grade_student(@student, grade: 8, grader: @teacher).first
       end
 
-      @submission = @assignment.grade_student(@student, grade: 9, grader: @teacher).first
+      @submission = @assignment.grade_student(@student, grade: 9, grader: @teacher, graded_anonymously: true).first
 
       load_admin_tools_page
       click_view_tab "logging"
@@ -346,7 +346,7 @@ describe "admin_tools" do
       expect(ff('#gradeChangeLoggingSearchResults table tbody tr').length).to eq 3
 
       cols = ffj('#gradeChangeLoggingSearchResults table tbody tr:last td')
-      expect(cols.size).to eq 8
+      expect(cols.size).to eq 9
 
       expect(cols[2].text).to eq "-"
       expect(cols[3].text).to eq "7"
@@ -354,6 +354,16 @@ describe "admin_tools" do
       expect(cols[5].text).to eq @student.name
       expect(cols[6].text).to eq @course.name
       expect(cols[7].text).to eq @assignment.title
+      expect(cols[8].text).to eq "n"
+    end
+
+    it "displays 'y' if graded anonymously" do
+      perform_autocomplete_search("#grader_id-autocompleteField", @teacher.name)
+      f('#loggingGradeChange button[name=gradeChange_submit]').click
+      wait_for_ajaximations
+
+      cols = ffj('#gradeChangeLoggingSearchResults table tbody tr:first td')
+      expect(cols[8].text).to eq "y"
     end
 
     it "should search by student name" do

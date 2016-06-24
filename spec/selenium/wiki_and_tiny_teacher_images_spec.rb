@@ -1,12 +1,15 @@
-require File.expand_path(File.dirname(__FILE__) + '/helpers/wiki_and_tiny_common')
-require File.expand_path(File.dirname(__FILE__) + '/helpers/quizzes_common')
+require_relative "common"
+require_relative "helpers/wiki_and_tiny_common"
+require_relative "helpers/quizzes_common"
 
 describe "Wiki pages and Tiny WYSIWYG editor Images" do
   include_context "in-process server selenium tests"
+  include QuizzesCommon
+  include WikiAndTinyCommon
 
   context "wiki and tiny images as a teacher" do
 
-    before (:each) do
+    before(:each) do
       course_with_teacher_logged_in
       @blank_page = @course.wiki.wiki_pages.create! :title => 'blank'
     end
@@ -106,15 +109,15 @@ describe "Wiki pages and Tiny WYSIWYG editor Images" do
 
       wait_for_tiny(keep_trying_until { f("form.edit-form .edit-content") })
       f('.upload_new_file_link').click
-      fj('a.switch_views:visible').click
       wiki_page_body = clear_wiki_rce
 
       expect(@image_list.find_elements(:css, '.img').length).to eq 2
 
       wiki_page_tools_upload_file('#sidebar_upload_file_form', :image)
-
+      wait_for_ajaximations
       expect(root_folders.first.find_elements(:css, '.file.image').length).to eq 3
       expect(@image_list.find_elements(:css, '.img').length).to eq 3
+      switch_editor_views(wiki_page_body)
       expect(find_css_in_string(wiki_page_body[:value], '.instructure_file_link')).not_to be_empty
     end
 

@@ -1,37 +1,88 @@
-/** @jsx React.DOM */
-
 define([
   'react',
+  'page',
+  'jquery',
   'i18n!react_files',
   'classnames',
-  'react-router',
   'react-modal',
   'compiled/react_files/components/FilePreview',
   'jsx/files/FilePreviewInfoPanel',
   'compiled/react_files/utils/collectionHandler',
+  'compiled/react_files/modules/FocusStore',
   'compiled/fn/preventDefault',
   'compiled/models/Folder'
-], function (React, I18n, classnames, ReactRouter, ReactModal, FilePreview, FilePreviewInfoPanel, CollectionHandler, preventDefault, Folder) {
+], function (React, page, $, I18n, classnames, ReactModal, FilePreview, FilePreviewInfoPanel, CollectionHandler, FocusStore, preventDefault, Folder) {
 
-  var Link = ReactRouter.Link;
+  const modalOverrides = {
+    overlay : {
+      backgroundColor: 'rgba(0,0,0,0.75)'
+    },
+    content : {
+      position: 'static',
+      top: '0',
+      left: '0',
+      right: 'auto',
+      bottom: 'auto',
+      borderRadius: '0',
+      border: 'none',
+      padding: '0'
+    }
+  };
+
+  FilePreview.handleKeyboardNavigation = function (event) {
+    if (!((event.keyCode === $.ui.keyCode.LEFT) || (event.keyCode === $.ui.keyCode.RIGHT))) {
+      return null;
+    }
+    let nextItem = null;
+    if (event.keyCode === $.ui.keyCode.LEFT) {
+      nextItem = CollectionHandler.getPreviousInRelationTo(this.state.otherItems, this.state.displayedItem);
+    }
+    if (event.keyCode === $.ui.keyCode.RIGHT) {
+      nextItem = CollectionHandler.getNextInRelationTo(this.state.otherItems, this.state.displayedItem);
+    }
+
+    page(`${this.getRouteIdentifier()}?${$.param(this.getNavigationParams({id: nextItem.id}))}`);
+
+  };
+
+  FilePreview.closeModal = function () {
+    // TODO Remove this jQuery line once react modal is upgraded. It should clean
+    // itself up after unmounting but it doesn't so using this quick fix for now
+    // until everything is upgraded.
+    $('#application').removeAttr('aria-hidden')
+    // ############## kill me #####################
+    page(`${this.getRouteIdentifier()}?${$.param(this.getNavigationParams({except: 'only_preview'}))}`);
+    FocusStore.setFocusToItem();
+  };
+
+  FilePreview.getRouteIdentifier = function () {
+    if (this.props.query && this.props.query.search_term) {
+      return '/search';
+    } else if (this.props.splat) {
+      return `/folder/${this.props.splat}`;
+    } else {
+      return '';
+    }
+  };
 
   FilePreview.renderArrowLink = function (direction) {
     var nextItem = (direction === 'left') ?
                    CollectionHandler.getPreviousInRelationTo(this.state.otherItems, this.state.displayedItem) :
                    CollectionHandler.getNextInRelationTo(this.state.otherItems, this.state.displayedItem);
 
+    var linkText = (direction === 'left') ? I18n.t('View previous file') : I18n.t('View next file')
+    const baseUrl = page.base();
     return (
       <div className='col-xs-1 ef-file-arrow_container'>
-        <Link
-          to={this.getRouteIdentifier()}
-          query={this.getNavigationParams((nextItem) ? {id: nextItem.id} : null)}
-          params={this.getParams()}
+        <a
+          href={`${baseUrl}${this.getRouteIdentifier()}?${$.param(this.getNavigationParams((nextItem) ? {id: nextItem.id} : null))}`}
           className='ef-file-preview-container-arrow-link'
         >
           <div className='ef-file-preview-arrow-link'>
-            <i className={`icon-arrow-open-${direction}`} />
+            <span className='screenreader-only'>{linkText}</span>
+            <i aria-hidden='true' className={`icon-arrow-open-${direction}`} />
           </div>
-        </Link>
+        </a>
       </div>
     );
   };
@@ -50,13 +101,6 @@ define([
           src={this.state.displayedItem.get('preview_url')}
           className={iFrameClasses}
         />
-      );
-    } else if (this.state.displayedItem instanceof Folder) {
-      return (
-        <div className='ef-file-not-found ef-file-preview-frame'>
-          <i className='media-object ef-not-found-icon FilesystemObjectThumbnail mimeClass-folder' />
-          {this.state.displayedItem.attributes.name}
-        </div>
       );
     } else {
       return (
@@ -78,11 +122,14 @@ define([
 
     return (
       <ReactModal
-        isOpen={true}
+        ref='modal'
+        isOpen={this.props.isOpen}
         onRequestClose={this.closeModal}
         className='ReactModal__Content--ef-file-preview'
         overlayClassName='ReactModal__Overlay--ef-file-preview'
+        style={modalOverrides}
         closeTimeoutMS={10}
+        appElement={document.getElementById('application')}
       >
         <div className='ef-file-preview-overlay'>
           <div className='ef-file-preview-header'>

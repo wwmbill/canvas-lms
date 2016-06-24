@@ -26,7 +26,7 @@ module IncomingMail
       # This prevents us from rebouncing users that have auto-replies setup -- only bounce something
       # that was sent out because of a notification.
       raise IncomingMail::Errors::SilentIgnore unless original_message && original_message.notification_id
-      raise IncomingMail::Errors::SilentIgnore unless valid_secure_id?(original_message, secure_id)
+      raise IncomingMail::Errors::SilentIgnore unless valid_secure_id?(original_message_id, secure_id)
 
       from_channel = nil
       original_message.shard.activate do
@@ -99,7 +99,7 @@ module IncomingMail
       ndr_body = ""
       case error
         when IncomingMail::Errors::ReplyToDeletedDiscussion
-          ndr_subject = I18n.t("Message Reply Failed: %{subject}", :subject => subject)
+          ndr_subject = I18n.t("Undelivered message")
           ndr_body = I18n.t(<<-BODY, :subject => subject).gsub(/^ +/, '')
           The message titled "%{subject}" could not be delivered because the discussion topic has been deleted. If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
 
@@ -107,7 +107,7 @@ module IncomingMail
           Canvas Support
           BODY
         when IncomingMail::Errors::ReplyToLockedTopic
-          ndr_subject = I18n.t('lib.incoming_message_processor.locked_topic.subject', "Message Reply Failed: %{subject}", :subject => subject)
+          ndr_subject = I18n.t("Undelivered message")
           ndr_body = I18n.t('lib.incoming_message_processor.locked_topic.body', <<-BODY, :subject => subject).gsub(/^ +/, '')
           The message titled "%{subject}" could not be delivered because the discussion topic is locked. If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
 
@@ -115,15 +115,15 @@ module IncomingMail
           Canvas Support
           BODY
         when IncomingMail::Errors::UnknownSender
-          ndr_subject = I18n.t("Message Reply Failed: %{subject}", :subject => subject)
+          ndr_subject = I18n.t("Undelivered message")
           ndr_body = I18n.t(<<-BODY, :subject => subject).gsub(/^ +/, '')
-          The message titled "%{subject}" could not be delivered.  The message was sent from an address that is not linked with your Canvas account.  If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
+          The message you sent with the subject line "%{subject}" was not delivered. To reply to Canvas messages from this email, it must first be a confirmed communication channel in your Canvas profile. Please visit your profile and resend the confirmation email for this email address [See https://community.canvaslms.com/docs/DOC-2281]. You may also contact this person via the Canvas Inbox [See https://community.canvaslms.com/docs/DOC-2670].
 
           Thank you,
           Canvas Support
           BODY
         else # including IncomingMessageProcessor::UnknownAddressError
-          ndr_subject = I18n.t('lib.incoming_message_processor.failure_message.subject', "Message Reply Failed: %{subject}", :subject => subject)
+          ndr_subject = I18n.t("Undelivered message")
           ndr_body = I18n.t('lib.incoming_message_processor.failure_message.body', <<-BODY, :subject => subject).gsub(/^ +/, '')
           The message titled "%{subject}" could not be delivered.  The message was sent to an unknown mailbox address.  If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
 
@@ -135,8 +135,8 @@ module IncomingMail
       [ndr_subject, ndr_body]
     end
 
-    def valid_secure_id?(original_message, secure_id)
-      Canvas::Security.verify_hmac_sha1(secure_id, original_message.global_id.to_s)
+    def valid_secure_id?(original_message_id, secure_id)
+      Canvas::Security.verify_hmac_sha1(secure_id, original_message_id)
     end
 
     def valid_user_and_context?(context, user)
@@ -157,8 +157,8 @@ module IncomingMail
     end
 
     def parse_tag(tag)
-      match = tag.match /^(\h+)-(\d+)$/
-      return match[1], match[2].to_i if match
+      match = tag.match /^(\h+)-([0-9~]+)$/
+      return match[1], match[2] if match
     end
   end
 end

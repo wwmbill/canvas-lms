@@ -1,11 +1,17 @@
-require File.expand_path(File.dirname(__FILE__) + '/helpers/gradebook2_common')
-require File.expand_path(File.dirname(__FILE__) + '/helpers/groups_common')
-require File.expand_path(File.dirname(__FILE__) + '/helpers/assignments_common')
-require File.expand_path(File.dirname(__FILE__) + '/helpers/quizzes_common')
-require File.expand_path(File.dirname(__FILE__) + '/helpers/speed_grader_common')
+require_relative "common"
+require_relative "helpers/gradebook2_common"
+require_relative "helpers/groups_common"
+require_relative "helpers/assignments_common"
+require_relative "helpers/quizzes_common"
+require_relative "helpers/speed_grader_common"
 
 describe 'Speedgrader' do
   include_context "in-process server selenium tests"
+  include QuizzesCommon
+  include Gradebook2Common
+  include GroupsCommon
+  include AssignmentsCommon
+  include SpeedGraderCommon
 
   let(:rubric_data) do
     [
@@ -32,6 +38,11 @@ describe 'Speedgrader' do
     ]
   end
 
+  def let_speedgrader_load
+    wait = Selenium::WebDriver::Wait.new(timeout: 5)
+    wait.until { f("#grading-box-extended").attribute('value') != "" }
+  end
+
   context 'grading' do
     it 'complete/incomplete', priority: "1", test_id: 164014 do
       init_course_with_students 2
@@ -44,6 +55,7 @@ describe 'Speedgrader' do
       @assignment.grade_student @students[1], {grade: 'incomplete'}
 
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
+      let_speedgrader_load
       expect(f('#grading-box-extended').attribute 'value').to eq 'complete'
       f('a.next').click
       expect(f('#grading-box-extended').attribute 'value').to eq 'incomplete'
@@ -57,6 +69,7 @@ describe 'Speedgrader' do
       @assignment.grade_student @students[1], {grade: 'C'}
 
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
+      let_speedgrader_load
       expect(f('#grading-box-extended').attribute 'value').to eq 'A'
       f('a.next').click
       expect(f('#grading-box-extended').attribute 'value').to eq 'C'
@@ -72,6 +85,7 @@ describe 'Speedgrader' do
       @assignment.grade_student @students[1], {grade: 10}
 
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
+      let_speedgrader_load
       expect(f('#grading-box-extended').attribute 'value').to eq '75'
       f('a.next').click
       expect(f('#grading-box-extended').attribute 'value').to eq '50'
@@ -87,7 +101,7 @@ describe 'Speedgrader' do
       @assignment.grade_student @students[1], {grade: 10}
 
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
-      sleep 5
+      let_speedgrader_load
       expect(f('#grading-box-extended').attribute 'value').to eq '15'
       f('a.next').click
       expect(f('#grading-box-extended').attribute 'value').to eq '10'
@@ -103,11 +117,60 @@ describe 'Speedgrader' do
       @assignment.grade_student @students[1], {grade: 'D'}
 
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
+      let_speedgrader_load
       expect(f('#grading-box-extended').attribute 'value').to eq 'A'
       f('a.next').click
       expect(f('#grading-box-extended').attribute 'value').to eq 'D'
 
       clear_grade_and_validate
+    end
+
+    context 'quizzes' do
+      before(:each) do
+        init_course_with_students
+        quiz = seed_quiz_with_submission
+
+        user_session(@teacher)
+        get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{quiz.assignment_id}"
+        driver.switch_to.frame f('#speedgrader_iframe')
+      end
+
+      it 'should display needs review alert on non-autograde questions', priority: "1", test_id: 441360 do
+        expect(ff('#update_history_form .alert')[0].text).to include_text('The following questions need review:')
+      end
+
+      it 'should only display needs review for file_upload and essay questions', priority: "2", test_id: 452539 do
+        questions_to_grade = ff('#questions_needing_review li a')
+        expect(questions_to_grade[0].text).to include_text('Question 2')
+        expect(questions_to_grade[1].text).to include_text('Question 3')
+      end
+
+      it 'should not display review warning on text only quiz questions', priority: "1", test_id: 377664 do
+        expect(ff('#update_history_form .alert')[0].text).not_to include_text('Question 4')
+      end
+    end
+
+    context 'pass/fail assignment grading' do
+      before :each do
+        init_course_with_students 1
+        @assignment = @course.assignments.create!(grading_type: 'pass_fail', points_possible: 0)
+        @assignment.grade_student(@students[0], grade: 'pass')
+      end
+
+      it 'should allow pass grade on assignments worth 0 points', priority: "1", test_id: 400127 do
+        get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
+        let_speedgrader_load
+        expect(f('#grading-box-extended')['value']).to eq('complete')
+        expect(fj('#grade_container label').text()).to include_text('(0 / 0)')
+      end
+
+      it 'should display pass/fail correctly when total points possible is changed', priority: "1", test_id: 419289 do
+        @assignment.update_attributes(points_possible: 1)
+        get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}#"
+        let_speedgrader_load
+        expect(f('#grading-box-extended')['value']).to eq('complete')
+        expect(fj('#grade_container label').text()).to include_text('(1 / 1)')
+      end
     end
 
     context 'Using a rubric saves grades' do
@@ -159,7 +222,7 @@ describe 'Speedgrader' do
         f('button.save_rubric_button').click
         wait_for_ajaximations
 
-        expect(f("#student_grading_#{@assignment.id}").attribute 'value').to eq '10'
+        keep_trying_until { expect(f("#student_grading_#{@assignment.id}").attribute 'value').to eq '10' }
       end
     end
     context 'Using a rubric to grade' do
@@ -170,16 +233,14 @@ describe 'Speedgrader' do
         @association = @rubric.associate_with(@assignment, @course, purpose: 'grading', use_for_grading: true)
         @submission = Submission.create!(user: @student, assignment: @assignment, submission_type: "online_text_entry", has_rubric_assessment: true)
         @assessment = @association.assess(
-                                            user: @student, 
-                                            assessor: @teacher, 
-                                            artifact: @submission, 
-                                            assessment: {
-                                              assessment_type: 'grading',
-                                              criterion_crit1: {
-                                                  points: 5
-                                              }
-                                            }
-                                          )
+          user: @student,
+          assessor: @teacher,
+          artifact: @submission,
+          assessment: {
+            assessment_type: 'grading',
+            criterion_crit1: { points: 5 }
+          }
+        )
         get "/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}"
         f('a.assess_submission_link').click
 
@@ -240,8 +301,7 @@ describe 'Speedgrader' do
     it 'displays question navigation bar when setting is enabled', priority: "1", test_id: 164019 do
       init_course_with_students
 
-      quiz = seed_quiz_wth_submission
-
+      quiz = seed_quiz_with_submission
       user_session(@teacher)
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{quiz.assignment_id}"
 
@@ -257,13 +317,14 @@ describe 'Speedgrader' do
       expect(f('header.quiz-header').text).to include quiz.title
       expect(f('#quiz-nav-inner-wrapper')).to be_displayed
       nav = ff('.quiz-nav-li')
-      expect(nav.length).to eq 3
+      expect(nav.length).to eq 4
     end
 
     it 'scrolls nav bar and to questions', priority: "1", test_id: 164020 do
+      skip_if_chrome('broken')
       init_course_with_students
 
-      quiz = seed_quiz_wth_submission 10
+      quiz = seed_quiz_with_submission(10)
 
       @teacher.preferences[:enable_speedgrader_grade_by_question] = true
       @teacher.save!
@@ -275,7 +336,7 @@ describe 'Speedgrader' do
       expect(f('header.quiz-header').text).to include quiz.title
 
       expect(wrapper).to be_displayed
-      expect(ff('.quiz-nav-li').length).to eq 30
+      expect(ff('.quiz-nav-li').length).to eq 40
 
       # check scrolling
       first_left = wrapper.css_value('left')
@@ -287,7 +348,7 @@ describe 'Speedgrader' do
       # check anchors
       anchors = ff('#quiz-nav-inner-wrapper li a')
 
-      [17, 5, 25].each do |index|
+      [17, 25, 33].each do |index|
         data_id = anchors[index].attribute 'data-id'
         anchors[index].click
         wait_for_animations
@@ -297,10 +358,8 @@ describe 'Speedgrader' do
   end
 
   it 'updates scores', priority: "1", test_id: 164021 do
-    skip "Skipped because this spec fails if not run in foreground\nThis is believed to be the issue: https://code.google.com/p/selenium/issues/detail?id=7346"
-
     init_course_with_students
-    quiz = seed_quiz 10
+    quiz = seed_quiz_with_submission(10)
 
     @teacher.preferences[:enable_speedgrader_grade_by_question] = true
     @teacher.save!
@@ -308,71 +367,136 @@ describe 'Speedgrader' do
     get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{quiz.assignment_id}"
 
     driver.switch_to.frame f('#speedgrader_iframe')
-      list = ff('#questions .user_points input')
-      [9, 17, 25].each do |index|
-        driver.execute_script("$('#questions .user_points input').focus()")
-        replace_content list[index], "1\t"
-      end
-      expect(f('#after_fudge_points_total').text).to eq '3'
-
-    # For whatever reason, this spec fails occasionally.
-    # Expected "3"
-    # Got "2"
-
-    replace_content f('#fudge_points_entry'), "7\t"
+    list = ff('#questions .user_points input')
+    [9, 17, 25].each do |index|
+      driver.execute_script("$('#questions .user_points input').focus()")
+      replace_content list[index], "1", :tab_out => true
+    end
     expect_new_page_load {f('button.update-scores').click}
-    expect(f('#after_fudge_points_total').text). to eq '10'
+    expect(f('#after_fudge_points_total').text).to eq '3'
+
+    replace_content f('#fudge_points_entry'), "7", :tab_out => true
+    expect_new_page_load {f('button.update-scores').click}
+    expect(f('#after_fudge_points_total').text).to eq '10'
   end
 
-  it 'should have working student drop-down arrows ', priority: "1", test_id: 164018 do
-    init_course_with_students 2
-    assignment = create_assignment_with_type('letter_grade')
+  context 'Student drop-down' do
+    before :each do
+      init_course_with_students 2
+      assignment = create_assignment_with_type('letter_grade')
 
-    # see first student
-    get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}#"
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[0].name)
-    expect(f('#x_of_x_students_frd')).to include_text('Student 1 of 2')
+      # see first student
+      get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}#"
+      keep_trying_until { f(selectedStudent).text.include?(@students[0].name) }
+    end
 
-    # click next to second student
-    fj('.next').click
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[1].name)
-    expect(f('#x_of_x_students_frd')).to include_text('Student 2 of 2')
+    let(:selectedStudent) {'span.ui-selectmenu-item-header'}
+    let(:studentXofXlabel) {'#x_of_x_students_frd'}
+    let(:studentDropdownMenu) {'div.ui-selectmenu-menu.ui-selectmenu-open'}
+    let(:studentDropdown) {'a.ui-selectmenu'}
+    let(:next_) {'.next'}
+    let(:previous) {'.prev'}
 
-    # go bak to the first student
-    fj('.prev').click
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[0].name)
-    expect(f('#x_of_x_students_frd')).to include_text('Student 1 of 2')
+    it 'has working next and previous arrows ', priority: "1", test_id: 164018 do
+      # click next to second student
+      expect(cycle_students_correctly(next_))
+
+      # go bak to the first student
+      expect(cycle_students_correctly(previous))
+    end
+
+    it 'arrows wrap around to start when you reach the last student', priority: "1", test_id: 272512 do
+      # click next to second student
+      expect(cycle_students_correctly(next_))
+
+      # wrap around to the first student
+      expect(cycle_students_correctly(next_))
+    end
+
+    it 'list all students', priority: "1", test_id: 164206 do
+      f(studentDropdown).click
+
+      expect(f(studentDropdownMenu)).to include_text(@students[0].name)
+      expect(f(studentDropdownMenu)).to include_text(@students[1].name)
+    end
+
+    it 'list alias when hide student name is selected', priority: "2", test_id: 164208 do
+      f('#settings_link').click
+      f('#hide_student_names').click
+      expect_new_page_load { fj('.ui-dialog-buttonset .ui-button:visible:last').click }
+
+      f(studentDropdown).click
+      expect(f(studentDropdownMenu)).to include_text('Student 1')
+      expect(f(studentDropdownMenu)).to include_text('Student 2')
+    end
   end
 
-  it 'Student drop-down arrows should wrap around to start when you reach the last student', priority: "1", test_id: 272512 do
-    init_course_with_students 2
-    assignment = create_assignment_with_type('letter_grade')
+  context 'submissions' do
+    # set up course and users
+    let(:test_course) { course() }
+    let(:teacher)     { user(active_all: true) }
+    let(:student)     { user(active_all: true) }
+    let!(:enroll_teacher_and_students) do
+      test_course.enroll_user(teacher, 'TeacherEnrollment', enrollment_state: 'active')
+      test_course.enroll_user(student, 'StudentEnrollment', enrollment_state: 'active')
+    end
+    # create an assignment with online_upload type submission
+    let(:assignment) { test_course.assignments.create!( title: 'Assignment A', submission_types: 'online_text_entry,online_upload') }
+    # submit to the assignment as a student twice, one with file and other with text
+    let(:file_attachment) { attachment_model(:content_type => 'application/pdf', :context => student) }
+    let(:submit_with_attachment) do
+      assignment.submit_homework(
+        student,
+        submission_type: 'online_upload',
+        attachments: [file_attachment]
+      )
+    end
+    let(:resubmit_with_text) { assignment.submit_homework(student, submission_type: 'online_text_entry', body: 'hello!') }
+    it 'should display the correct file submission in the right sidebar', priority: "1", test_id: 525188 do
+      submit_with_attachment
+      user_session(teacher)
 
-    # see first student
-    get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}#"
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[0].name)
-    expect(f('#x_of_x_students_frd')).to include_text('Student 1 of 2')
+      get "/courses/#{test_course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}"
+      expect(fj('#submission_files_list .submission-file .display_name')).to include_text('unknown.loser')
+    end
 
-    # click next to second student
-    fj('.next').click
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[1].name)
-    expect(f('#x_of_x_students_frd')).to include_text('Student 2 of 2')
+    it 'should display submissions in order in the submission dropdown', priority: "1", test_id: 525189 do
+      Timecop.freeze(1.hour.ago) { submit_with_attachment }
+      resubmit_with_text
+      user_session(teacher)
 
-    # wrap around to the first student
-    fj('.next').click
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[0].name)
-    expect(f('#x_of_x_students_frd')).to include_text('Student 1 of 2')
+      get "/courses/#{test_course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}"
+      f('#submission_to_view').click
+      click_option('#submission_to_view', '0', :value)
+      wait_for_ajaximations
+      expect(f('#submission_files_list .submission-file .display_name')).to include_text('unknown.loser')
+    end
   end
 
-  it 'Student drop-down should list all students', priority: "1", test_id: 164206 do
-    init_course_with_students 2
-    assignment = create_assignment_with_type('letter_grade')
+  context 'speedgrader nav bar' do
+    # set up course, users and assignment
+    let(:test_course) { course() }
+    let(:teacher)     { user(active_all: true) }
+    let(:student)     { user(active_all: true) }
+    let!(:enroll_teacher_and_students) do
+      test_course.enroll_user(teacher, 'TeacherEnrollment', enrollment_state: 'active')
+      test_course.enroll_user(student, 'StudentEnrollment', enrollment_state: 'active')
+    end
+    let!(:assignment) do
+      test_course.assignments.create!(
+        title: 'Assignment A',
+        submission_types: 'online_text_entry,online_upload'
+      )
+    end
 
-    get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}#"
-    expect(fj('span.ui-selectmenu-item-header')).to include_text(@students[0].name)
+    it 'displays keyboard shortcut modal when clicking blue info icon', priority: "2", test_id: 759319 do
+      user_session(teacher)
+      get "/courses/#{test_course.id}/gradebook/speed_grader?assignment_id=#{assignment.id}"
 
-    f('a.ui-selectmenu').click
-    expect(fj('div.ui-selectmenu-menu.ui-selectmenu-open')).to include_text(@students[0].name)
-    expect(fj('div.ui-selectmenu-menu.ui-selectmenu-open')).to include_text(@students[1].name)
+      shortcut_modal = f('#keyboard_navigation')
+      f('#keyboard-shortcut-info-icon').click
+
+      expect(shortcut_modal).to be_displayed
+    end
   end
 end

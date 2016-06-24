@@ -25,12 +25,8 @@ class AccountAuthorizationConfig::GitHub < AccountAuthorizationConfig::Oauth2
     'github'.freeze
   end
 
-  def login_button?
-    true
-  end
-
   def self.recognized_params
-    [ :login_attribute ].freeze
+    [ :login_attribute, :jit_provisioning ].freeze
   end
 
   # Rename db field

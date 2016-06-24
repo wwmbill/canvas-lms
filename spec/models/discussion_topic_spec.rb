@@ -92,6 +92,11 @@ describe DiscussionTopic do
       @relevant_permissions = [:read, :reply, :update, :delete]
     end
 
+    it "should not grant moderate permissions without read permissions" do
+      @course.account.role_overrides.create!(:role => teacher_role, :permission => 'read_forum', :enabled => false)
+      expect((@topic.check_policy(@teacher2) & @relevant_permissions)).to be_empty
+    end
+
     it "should grant permissions if it not locked" do
       @topic.publish!
       expect((@topic.check_policy(@teacher1) & @relevant_permissions).map(&:to_s).sort).to eq ['read', 'reply', 'update', 'delete'].sort
@@ -213,7 +218,7 @@ describe DiscussionTopic do
 
       account = @course.root_account
       nobody_role = custom_account_role('NobodyAdmin', account: account)
-      account_with_role_changes(account: account, role: nobody_role, role_changes: { read_course_content: true })
+      account_with_role_changes(account: account, role: nobody_role, role_changes: { read_course_content: true, read_forum: true })
       admin = account_admin_user(account: account, role: nobody_role, active_user: true)
       expect(@topic.visible_for?(admin)).to be_truthy
     end
@@ -239,83 +244,64 @@ describe DiscussionTopic do
         @course.reload
       end
 
-      context "feature flag on" do
-        before {@course.enable_feature!(:differentiated_assignments)}
-        it "should be visible to a student with an override" do
-          expect(@topic.visible_for?(@student1)).to be_truthy
-        end
-        it "should not be visible to a student without an override" do
-          expect(@topic.visible_for?(@student2)).to be_falsey
-        end
-        it "should be visible to a teacher" do
-          expect(@topic.visible_for?(@teacher)).to be_truthy
-        end
-        it "should not grant reply permissions to a student without an override" do
-          expect(@topic.check_policy(@student1)).to include :reply
-          expect(@topic.check_policy(@student2)).not_to include :reply
-        end
-        context "active_participants_with_visibility" do
-          it "should filter participants by visibility" do
-            [@student1, @teacher].each do |user|
-              expect(@topic.active_participants_with_visibility.include?(user)).to be_truthy
-            end
-            expect(@topic.active_participants_with_visibility.include?(@student2)).to be_falsey
-          end
-
-          it "should work when ungraded and context is a course" do
-            group_category = @course.group_categories.create(:name => "new cat")
-            @topic = @course.discussion_topics.create(:title => "group topic")
-            @topic.save!
-
-            expect(@topic.context).to eq(@course)
-            expect(@topic.active_participants_with_visibility.include?(@student1)).to be_truthy
-            expect(@topic.active_participants_with_visibility.include?(@student2)).to be_truthy
-          end
-
-          it "should work when ungraded and context is a group" do
-            group_category = @course.group_categories.create(:name => "new cat")
-            @group = @course.groups.create(:name => "group", :group_category => group_category)
-            @group.add_user(@student1)
-            @topic = @group.discussion_topics.create(:title => "group topic")
-            @topic.save!
-
-            expect(@topic.context).to eq(@group)
-            expect(@topic.active_participants_with_visibility.include?(@student1)).to be_truthy
-            expect(@topic.active_participants_with_visibility.include?(@student2)).to be_falsey
-          end
-
-          it "should work for subtopics for graded assignments" do
-            group_discussion_assignment
-            ct = @topic.child_topics.first
-            ct.context.add_user(@student)
-
-            @section = @course.course_sections.create!(name: "test section")
-            student_in_section(@section, user: @student)
-            create_section_override_for_assignment(@assignment, {course_section: @section})
-
-            @topic = @topic.child_topics.first
-            @topic.subscribe(@student)
-            @topic.save!
-
-            expect(@topic.context.class).to eq(Group)
-            expect(@topic.active_participants_with_visibility.include?(@student)).to be_truthy
-          end
-        end
+      it "should be visible to a student with an override" do
+        expect(@topic.visible_for?(@student1)).to be_truthy
       end
-
-      context "feature flag off" do
-        before {@course.disable_feature!(:differentiated_assignments)}
-        it "should be visible to everybody in the class" do
-          [@student1,@student2,@teacher].each do |user|
-            expect(@topic.visible_for?(user)).to be_truthy
+      it "should not be visible to a student without an override" do
+        expect(@topic.visible_for?(@student2)).to be_falsey
+      end
+      it "should be visible to a teacher" do
+        expect(@topic.visible_for?(@teacher)).to be_truthy
+      end
+      it "should not grant reply permissions to a student without an override" do
+        expect(@topic.check_policy(@student1)).to include :reply
+        expect(@topic.check_policy(@student2)).not_to include :reply
+      end
+      context "active_participants_with_visibility" do
+        it "should filter participants by visibility" do
+          [@student1, @teacher].each do |user|
+            expect(@topic.active_participants_with_visibility.include?(user)).to be_truthy
           end
+          expect(@topic.active_participants_with_visibility.include?(@student2)).to be_falsey
         end
-        context "active_participants_with_visibility" do
-          it "should not filter any participants" do
-            [@student1,@student2].each do |user|
-              expect(@topic.active_participants_with_visibility.include?(user)).to be_truthy
-            end
-          end
+
+        it "should work when ungraded and context is a course" do
+          group_category = @course.group_categories.create(:name => "new cat")
+          @topic = @course.discussion_topics.create(:title => "group topic")
+          @topic.save!
+
+          expect(@topic.context).to eq(@course)
+          expect(@topic.active_participants_with_visibility.include?(@student1)).to be_truthy
+          expect(@topic.active_participants_with_visibility.include?(@student2)).to be_truthy
+        end
+
+        it "should work when ungraded and context is a group" do
+          group_category = @course.group_categories.create(:name => "new cat")
+          @group = @course.groups.create(:name => "group", :group_category => group_category)
+          @group.add_user(@student1)
+          @topic = @group.discussion_topics.create(:title => "group topic")
+          @topic.save!
+
+          expect(@topic.context).to eq(@group)
+          expect(@topic.active_participants_with_visibility.include?(@student1)).to be_truthy
+          expect(@topic.active_participants_with_visibility.include?(@student2)).to be_falsey
+        end
+
+        it "should work for subtopics for graded assignments" do
+          group_discussion_assignment
+          ct = @topic.child_topics.first
+          ct.context.add_user(@student)
+
+          @section = @course.course_sections.create!(name: "test section")
+          student_in_section(@section, user: @student)
+          create_section_override_for_assignment(@assignment, {course_section: @section})
+
+          @topic = @topic.child_topics.first
+          @topic.subscribe(@student)
+          @topic.save!
+
+          expect(@topic.context.class).to eq(Group)
+          expect(@topic.active_participants_with_visibility.include?(@student)).to be_truthy
         end
       end
     end
@@ -349,7 +335,6 @@ describe DiscussionTopic do
       student_in_section(@section, user: @student1)
       create_section_override_for_assignment(@assignment, {course_section: @section})
       create_section_override_for_assignment(@assignment3, {course_section: @section2})
-      @course.enable_feature!(:differentiated_assignments)
       @course.reload
       @vis_hash = DiscussionTopic.visible_ids_by_user(course_id: @course.id, user_id: [@student1, @student2, @student3].map(&:id))
     end
@@ -620,6 +605,36 @@ describe DiscussionTopic do
       group = @course.groups.create!(:name => "group 1", :group_category => group_category)
       expect(topic.reload.child_topics.size).to eq 1
       expect(group.reload.discussion_topics.size).to eq 1
+    end
+
+    it "should not break when groups have silly long names" do
+      group_category = @course.group_categories.create!(:name => "category")
+
+      topic = @course.discussion_topics.build(:title => "here's a reasonable topic name")
+      topic.group_category = group_category
+      topic.save!
+
+      group = @course.groups.create!(:name => "a" * 250, :group_category => group_category)
+      expect(topic.reload.child_topics.size).to eq 1
+      expect(group.reload.discussion_topics.size).to eq 1
+    end
+
+    it "should delete child topics when group category is removed" do
+      group_category = @course.group_categories.create!(:name => "category")
+      group = @course.groups.create!(:name => "group 1", :group_category => group_category)
+
+      topic = @course.discussion_topics.build(:title => "topic")
+      topic.group_category = group_category
+      topic.save!
+
+      expect(topic.reload.child_topics.active.count).to eq 1
+      expect(group.reload.discussion_topics.active.count).to eq 1
+
+      topic.group_category = nil
+      topic.save!
+
+      expect(topic.reload.child_topics.active.count).to eq 0
+      expect(group.reload.discussion_topics.active.count).to eq 0
     end
 
     context "in a group discussion" do
@@ -934,7 +949,6 @@ describe DiscussionTopic do
         create_section_override_for_assignment(@topic.assignment, {course_section: @section})
       end
       context "enabled" do
-        before{@course.enable_feature!(:differentiated_assignments)}
         it "should filter subscribers based on visibility" do
           @topic.subscribe(@student)
           expect(@topic.subscribers).not_to include(@student)
@@ -971,13 +985,6 @@ describe DiscussionTopic do
           expect(@topic.subscribers).to include(@student)
         end
 
-      end
-      context "disabled" do
-        before{@course.disable_feature!(:differentiated_assignments)}
-        it "should not filter subscribers based on visibility" do
-          @topic.subscribe(@student)
-          expect(@topic.subscribers).to include(@student)
-        end
       end
     end
   end
@@ -1223,6 +1230,39 @@ describe DiscussionTopic do
 
       @topic.ensure_submission(@student)
       expect(@submission.reload.workflow_state).to eq 'graded'
+    end
+
+    it "should associate attachments with graded discussion submissions" do
+      @assignment = assignment_model(:course => @course)
+      @topic.assignment = @assignment
+      @topic.save!
+      @topic.reload
+
+      attachment_model(:context => @user, :uploaded_data => stub_png_data, :filename => "homework.png")
+      entry = @topic.reply_from(:user => @student, :text => "entry")
+      entry.attachment = @attachment
+      entry.save!
+
+      @topic.ensure_submission(@student)
+      sub = @assignment.submissions.where(:user_id => @student).first
+      expect(sub.attachments.to_a).to eq [@attachment]
+    end
+  end
+
+  describe "#unread_count" do
+    let(:topic) do
+      @course.discussion_topics.create!(:title => "title", :message => "message")
+    end
+
+    it "returns 0 for a nil user" do
+      topic.discussion_entries.create!
+      expect(topic.unread_count(nil)).to eq 0
+    end
+
+    it "returns the default_unread_count if the user has no discussion_topic_participant" do
+      topic.discussion_entries.create!
+      student_in_course
+      expect(topic.unread_count(@student)).to eq 1
     end
   end
 
@@ -1520,24 +1560,32 @@ describe DiscussionTopic do
   end
 
   context "restore" do
-    before(:once) { group_discussion_assignment }
-
     it "should restore the assignment and associated child topics" do
+      group_discussion_assignment
       @topic.destroy
 
       @topic.reload.assignment.expects(:restore).with(:discussion_topic).once
       @topic.restore
-      expect(@topic.reload).to be_active
-      @topic.child_topics.each { |ct| expect(ct.reload).to be_active }
+      expect(@topic.reload).to be_unpublished
+      @topic.child_topics.each { |ct| expect(ct.reload).to be_unpublished }
+      expect(@topic.assignment).to be_unpublished
     end
 
-    it "should restore to unpublished state if draft mode is enabled" do
+    it "should restore an announcement to active state" do
+      ann = @course.announcements.create!(:title => "something", :message => "somethingelse")
+      ann.destroy
+
+      ann.restore
+      expect(ann.reload).to be_active
+    end
+
+    it "should restore a topic with submissions to active state" do
+      discussion_topic_model(:context => @course)
+      @topic.reply_from(user: @student, text: "huttah!")
       @topic.destroy
 
-      @topic.reload.assignment.expects(:restore).with(:discussion_topic).once
       @topic.restore
-      expect(@topic.reload).to be_post_delayed
-      @topic.child_topics.each { |ct| expect(ct.reload).to be_post_delayed }
+      expect(@topic.reload).to be_active
     end
   end
 
@@ -1559,19 +1607,21 @@ describe DiscussionTopic do
     end
 
     it "should not allow replies from students to locked topics" do
-      discussion_topic_model
+      course_with_teacher(:active_all => true)
+      discussion_topic_model(:context => @course)
       @topic.lock!
       @topic.reply_from(:user => @teacher, :text => "reply") # should not raise error
-      student_in_course(:course => @course)
+      student_in_course(:course => @course).accept!
       expect { @topic.reply_from(:user => @student, :text => "reply") }.to raise_error(IncomingMail::Errors::ReplyToLockedTopic)
     end
 
     it "should not allow replies from students to topics locked based on date" do
-      discussion_topic_model
+      course_with_teacher(:active_all => true)
+      discussion_topic_model(:context => @course)
       @topic.unlock_at = 1.day.from_now
       @topic.save!
       @topic.reply_from(:user => @teacher, :text => "reply") # should not raise error
-      student_in_course(:course => @course)
+      student_in_course(:course => @course).accept!
       expect { @topic.reply_from(:user => @student, :text => "reply") }.to raise_error(IncomingMail::Errors::ReplyToLockedTopic)
     end
   end
@@ -1718,6 +1768,44 @@ describe DiscussionTopic do
           end
           expect(c.announcements.by_posted_at).to eq(anns)
         end
+      end
+    end
+  end
+
+  context "notifications" do
+    before :once do
+      user_with_pseudonym(:active_all => true)
+      course_with_teacher(:user => @user, :active_enrollment => true)
+      n = Notification.create!(:name => "New Discussion Topic", :category => "TestImmediately")
+      NotificationPolicy.create!(:notification => n, :communication_channel => @user.communication_channel, :frequency => "immediately")
+    end
+
+    it "should send a message for a published course" do
+      @course.offer!
+      topic = @course.discussion_topics.create!(:title => "title")
+      expect(topic.messages_sent["New Discussion Topic"].map(&:user)).to be_include(@user)
+    end
+
+    it "should not send a message for an unpublished course" do
+      topic = @course.discussion_topics.create!(:title => "title")
+      expect(topic.messages_sent["New Discussion Topic"]).to be_blank
+    end
+
+    context "group discussions" do
+      before :once do
+        group_model(:context => @course)
+        @group.add_user(@user)
+      end
+
+      it "should send a message for a group discussion in a published course" do
+        @course.offer!
+        topic = @group.discussion_topics.create!(:title => "title")
+        expect(topic.messages_sent["New Discussion Topic"].map(&:user)).to be_include(@user)
+      end
+
+      it "should not send a message for a group discussion in an unpublished course" do
+        topic = @group.discussion_topics.create!(:title => "title")
+        expect(topic.messages_sent["New Discussion Topic"]).to be_blank
       end
     end
   end

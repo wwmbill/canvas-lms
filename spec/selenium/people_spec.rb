@@ -64,16 +64,24 @@ describe "people" do
     enroll_student(student_4)
   end
 
-  def open_dropdown_menu(selector: nil, option: nil, displayed: true)
-    selector ||= ".rosterUser"
+  def open_dropdown_menu(selector = ".rosterUser")
     row = f(selector)
     driver.action.move_to(row).perform
     f("#{selector} .admin-links a.al-trigger").click
     expect(f("#{selector} .admin-links ul.al-options")).to be_displayed
-    if option
-      to_be_or_not_to_be = displayed ? :to : :not_to
-      expect(element_exists("#{selector} .admin-links ul.al-options li a[data-event=#{option}]")).send to_be_or_not_to_be, be_truthy
-    end
+  end
+
+  def dropdown_item_exists?(option, selector = ".rosterUser")
+    element_exists(f("#{selector} .admin-links ul.al-options li a[data-event=#{option}]"))
+  end
+
+  # Returns visibility boolean, assumes existence
+  def dropdown_item_visible?(option, selector = ".rosterUser")
+    f("#{selector} .admin-links ul.al-options li a[data-event=#{option}]").displayed?
+  end
+
+  def close_dropdown_menu
+    driver.action.send_keys(:escape).perform
   end
 
   context "people as a teacher" do
@@ -114,11 +122,44 @@ describe "people" do
     end
 
     it "should display the option to remove a student from a course if manually enrolled" do
-      open_dropdown_menu(option: 'removeFromCourse')
+      open_dropdown_menu("tr[id=user_#{@student_1.id}]")
+      expect(dropdown_item_visible?('removeFromCourse', "tr[id=user_#{@student_1.id}]")).to be true
+    end
+
+    it "should display the option to remove a student from a course has a SIS ID", priority: "1", test_id: 336018 do
+      @course.sis_source_id = 'xyz'
+      @course.save
+      enroll_student(@student_2)
+      # need to hit /users page again to show enrollment of 2nd student
+      get "/courses/#{@course.id}/users"
+      wait_for_ajaximations
+      # check 1st student
+      open_dropdown_menu("tr[id=user_#{@student_1.id}]")
+      expect(dropdown_item_visible?('removeFromCourse', "tr[id=user_#{@student_1.id}]")).to be true
+      close_dropdown_menu
+      # check 2nd student
+      open_dropdown_menu("tr[id=user_#{@student_2.id}]")
+      expect(dropdown_item_visible?('removeFromCourse', "tr[id=user_#{@student_2.id}]")).to be true
+    end
+
+    it "should display remove option for student with/without SIS id", priority: "1", test_id: 332576 do
+      enroll_student(@student_2)
+      @student = user
+      @course.enroll_student(@student).update_attribute(:sis_source_id, 'E001')
+      @course.save
+      get "/courses/#{@course.id}/users"
+      # check 1st student
+      open_dropdown_menu("tr[id=user_#{@student_1.id}]")
+      expect(dropdown_item_visible?('removeFromCourse', "tr[id=user_#{@student_1.id}]")).to be true
+      close_dropdown_menu
+      # check 2nd student
+      open_dropdown_menu("tr[id=user_#{@student_2.id}]")
+      expect(dropdown_item_visible?('removeFromCourse', "tr[id=user_#{@student_2.id}]")).to be true
     end
 
     it "should display the option to remove a ta from the course" do
-      open_dropdown_menu(option: 'removeFromCourse', selector: '.rosterUser:nth-child(3)')
+      open_dropdown_menu("tr[id=user_#{@test_ta.id}]")
+      expect(dropdown_item_visible?('removeFromCourse', "tr[id=user_#{@test_ta.id}]")).to be true
     end
 
     it "should display activity report on clicking Student Interaction button", priority: "1", test_id: 244446 do
@@ -268,14 +309,6 @@ describe "people" do
       expect(f('#users')).to include_text(@student_1.name)
     end
 
-    def link_to_student(enrollment, student)
-      enrollment.find_element(:css, ".link_enrollment_link").click
-      wait_for_ajax_requests
-      click_option("#student_enrollment_link_option", student.try(:name) || "[ No Link ]")
-      submit_form("#link_student_dialog_form")
-      wait_for_ajax_requests
-    end
-
     it "should deal with observers linked to multiple students" do
       @students = []
       @obs = user_model(:name => "The Observer")
@@ -300,28 +333,6 @@ describe "people" do
 
       expect(enrollments[0]).to include_text @students[0].name
       expect(enrollments[1]).to include_text @students[1].name
-
-      link_to_student(enrollments[0], @students[2])
-      expect(enrollments[0]).to include_text @students[2].name
-      expect(enrollments[1]).to include_text @students[1].name
-
-      link_to_student(enrollments[1], @students[3])
-      expect(enrollments[0]).to include_text @students[2].name
-      expect(enrollments[1]).to include_text @students[3].name
-
-      @obs.reload
-      expect(@obs.enrollments.map { |e| e.associated_user_id }.sort).to eq [@students[2].id, @students[3].id]
-
-      link_to_student(enrollments[0], nil)
-      expect(enrollments[0].find_element(:css, ".associated_user")).not_to be_displayed
-
-      link_to_student(enrollments[0], @students[0])
-      link_to_student(enrollments[1], @students[1])
-      expect(enrollments[0]).to include_text @students[0].name
-      expect(enrollments[1]).to include_text @students[1].name
-
-      @obs.reload
-      expect(@obs.enrollments.map { |e| e.associated_user_id }.sort).to eq [@students[0].id, @students[1].id]
     end
   end
 
@@ -347,22 +358,10 @@ describe "people" do
     end
   end
 
-  def add_a_section
-    section_name = 'section2'
-    get "/courses/#{@course.id}/settings#tab-sections"
-
-    section_input = f('#course_section_name')
-    keep_trying_until { expect(section_input).to be_displayed }
-    replace_content(section_input, section_name)
-    submit_form('#add_section_form')
-    wait_for_ajaximations
-    expect(ff('#sections > .section')[1]).to include_text(section_name)
-  end
-
   context "course with multiple sections", priority: "2" do
     before (:each) do
-      course_with_admin_logged_in
-      add_a_section
+      course_with_teacher_logged_in
+      @section2 = @course.course_sections.create!(name: 'section2')
     end
 
     it "should save add people form data" do
@@ -375,7 +374,8 @@ describe "people" do
       replace_content(f('#user_list_textarea'), 'student@example.com')
       click_option('#role_id', ta_role.id.to_s, :value)
       click_option('#course_section_id', 'Unnamed Course', :text)
-      f('#limit_privileges_to_course_section').click
+      scroll_page_to_bottom
+      move_to_click('#limit_privileges_to_course_section')
       f('#next-step').click
       wait_for_ajaximations
 
@@ -408,11 +408,9 @@ describe "people" do
     end
 
     it "should remove a student from a section", priority: "1", test_id: 296461 do
-     sec1 = @course.course_sections.create!(name: "section1")
-     sec2 = @course.course_sections.create!(name: "section2")
      @student = user
-     @course.enroll_student(@student, section: sec1, allow_multiple_enrollments: true)
-     @course.enroll_student(@student, section: sec2, allow_multiple_enrollments: true)
+     @course.enroll_student(@student, allow_multiple_enrollments: true)
+     @course.enroll_student(@student, section: @section2, allow_multiple_enrollments: true)
      get "/courses/#{@course.id}/users"
      ff(".icon-settings")[1].click
      fln("Edit Sections").click
@@ -420,6 +418,30 @@ describe "people" do
      ff('.ui-button-text')[1].click
      wait_for_ajaximations
      expect(ff(".StudentEnrollment")[0].text).not_to include_text("section2")
+    end
+
+    it "should gray out sections the user doesn't have permission to remove" do
+      @student = user_with_pseudonym
+      @course.enroll_student(@student, allow_multiple_enrollments: true).update_attribute(:sis_source_id, 'E001')
+      get "/courses/#{@course.id}/users"
+      ff(".icon-settings")[1].click
+      fln("Edit Sections").click
+      expect(f('#user_sections li.cannot_remove').text).to include @course.default_section.name
+
+      # add another section (not via SIS) and ensure it remains editable
+      f(".token_input.browsable").click
+      section_input_element = driver.find_element(:name, "token_capture")
+      section_input_element.send_keys("section2")
+      f('.last.context').click
+      wait_for_ajaximations
+      expect(f("a[title='Remove user from section2']")).not_to be_nil
+      f('.ui-dialog-buttonset .btn-primary').click
+      wait_for_ajaximations
+
+      ff(".icon-settings")[1].click
+      fln("Edit Sections").click
+      expect(f('#user_sections li.cannot_remove').text).to include @course.default_section.name
+      expect(f("a[title='Remove user from section2']")).not_to be_nil
     end
   end
 
@@ -433,7 +455,7 @@ describe "people" do
     Enrollment.where(:id => e1).update_all(:total_activity_time => 900)
     get "/courses/#{@course.id}/users"
     wait_for_ajaximations
-    expect(fj("#user_#{@student.id} td:nth-child(7)").text.strip).to eq "15:00"
+    expect(fj("#user_#{@student.id} td:nth-child(8)").text.strip).to eq "15:00"
   end
 
   it "should filter by role ids" do
@@ -453,5 +475,167 @@ describe "people" do
     click_option("select[name=enrollment_role_id]", new_role.id.to_s, :value)
     wait_for_ajaximations
     expect(ff('tr.rosterUser').count).to eq 1
+  end
+
+  context "editing role" do
+    before :once do
+      course
+      @section = @course.course_sections.create!(name: "section1")
+
+      @teacher = user_with_pseudonym(:active_all => true)
+      @enrollment = @course.enroll_teacher(@teacher)
+    end
+
+    before :each do
+      admin_logged_in
+    end
+
+    it "should let observers have their roles changed if they don't have associated users" do
+      @course.enroll_user(@teacher, "ObserverEnrollment", :allow_multiple_enrollments => true)
+
+      get "/courses/#{@course.id}/users"
+
+      open_dropdown_menu("#user_#{@teacher.id}")
+      expect(dropdown_item_exists?('editRoles', "#user_#{@teacher.id}")).to be true
+    end
+
+    it "should not let observers with associated users have their roles changed" do
+      student = user
+      @course.enroll_student(student)
+      @course.enroll_user(@teacher, "ObserverEnrollment", :allow_multiple_enrollments => true, :associated_user_id => student.id)
+
+      get "/courses/#{@course.id}/users"
+
+      open_dropdown_menu("#user_#{@teacher.id}")
+      expect(dropdown_item_exists?('editRoles', "#user_#{@teacher.id}")).to be false
+    end
+
+    def open_role_dialog(user)
+      f("#user_#{user.id} .admin-links a.al-trigger").click
+      f("#user_#{user.id} .admin-links a[data-event='editRoles']").click
+    end
+
+    it "should let users change to an observer role" do
+      get "/courses/#{@course.id}/users"
+
+      open_role_dialog(@teacher)
+
+      expect(f("#edit_roles #role_id option[selected]")).to include_text("Teacher")
+      expect(f("#edit_roles #role_id option[value='#{student_role.id}']")).to be_present
+      expect(f("#edit_roles #role_id option[value='#{observer_role.id}']")).to be_present
+    end
+
+    it "should not let users change to a type they don't have permission to manage" do
+      @course.root_account.role_overrides.create!(:role => admin_role, :permission => 'manage_students', :enabled => false)
+
+      get "/courses/#{@course.id}/users"
+
+      open_role_dialog(@teacher)
+      expect(f("#edit_roles #role_id option[value='#{ta_role.id}']")).to be_present
+      expect(f("#edit_roles #role_id option[value='#{student_role.id}']")).to be_nil
+    end
+
+    it "should retain the same enrollment state" do
+      role_name = 'Custom Teacher'
+      role = @course.account.roles.create(:name => role_name)
+      role.base_role_type = 'TeacherEnrollment'
+      role.save!
+      @enrollment.deactivate
+
+      get "/courses/#{@course.id}/users"
+
+      open_role_dialog(@teacher)
+      click_option("#edit_roles #role_id", role.id.to_s, :value)
+      f('.ui-dialog-buttonpane .btn-primary').click
+      wait_for_ajaximations
+      assert_flash_notice_message /Role successfully updated/
+
+      expect(f("#user_#{@teacher.id}")).to include_text(role_name)
+      @enrollment.reload
+      expect(@enrollment).to be_deleted
+
+      new_enrollment = @teacher.enrollments.not_deleted.first
+      expect(new_enrollment.role).to eq role
+      expect(new_enrollment.workflow_state).to eq "inactive"
+    end
+
+    it "should work with enrollments in different sections" do
+      enrollment2 = @course.enroll_user(@teacher, "TeacherEnrollment", :allow_multiple_enrollments => true, :section => @section)
+
+      get "/courses/#{@course.id}/users"
+
+      open_role_dialog(@teacher)
+      click_option("#edit_roles #role_id", ta_role.id.to_s, :value)
+      f('.ui-dialog-buttonpane .btn-primary').click
+      wait_for_ajaximations
+      assert_flash_notice_message /Role successfully updated/
+
+      expect(@enrollment.reload).to be_deleted
+      expect(enrollment2.reload).to be_deleted
+
+      new_enrollment1 = @teacher.enrollments.not_deleted.where(:course_section_id => @course.default_section).first
+      new_enrollment2 = @teacher.enrollments.not_deleted.where(:course_section_id => @section).first
+      expect(new_enrollment1.role).to eq ta_role
+      expect(new_enrollment2.role).to eq ta_role
+    end
+
+    it "should work with preexiting enrollments in the destination role" do
+      # should not try to overwrite this one
+      enrollment2 = @course.enroll_user(@teacher, "TaEnrollment", :allow_multiple_enrollments => true)
+
+      get "/courses/#{@course.id}/users"
+
+      open_role_dialog(@teacher)
+      click_option("#edit_roles #role_id", ta_role.id.to_s, :value)
+      f('.ui-dialog-buttonpane .btn-primary').click
+      wait_for_ajaximations
+      assert_flash_notice_message /Role successfully updated/
+
+      expect(@enrollment.reload).to be_deleted
+      expect(enrollment2.reload).to_not be_deleted
+    end
+
+    it "should work with multiple enrollments in one section" do
+      # shouldn't conflict with each other - should only add one enrollment for the new role
+      enrollment2 = @course.enroll_user(@teacher, "TaEnrollment", :allow_multiple_enrollments => true)
+
+      get "/courses/#{@course.id}/users"
+
+      open_role_dialog(@teacher)
+      expect(f("#edit_roles")).to include_text("This user has multiple roles") # warn them that both roles will be removed
+      click_option("#edit_roles #role_id", student_role.id.to_s, :value)
+      f('.ui-dialog-buttonpane .btn-primary').click
+      wait_for_ajaximations
+      assert_flash_notice_message /Role successfully updated/
+
+      expect(@enrollment.reload).to be_deleted
+      expect(enrollment2.reload).to be_deleted
+
+      new_enrollment = @teacher.enrollments.not_deleted.first
+      expect(new_enrollment.role).to eq student_role
+    end
+
+    it "should not show the option to edit roles for a soft-concluded course" do
+      @course.conclude_at = 2.days.ago
+      @course.restrict_enrollments_to_course_dates = true
+      @course.save!
+
+      get "/courses/#{@course.id}/users"
+      open_dropdown_menu("#user_#{@teacher.id}")
+      expect(dropdown_item_exists?('editRoles', "#user_#{@teacher.id}")).to be false
+    end
+
+    it "should not show the option to edit roles for a SIS imported enrollment" do
+      student = user_with_pseudonym(:active_all => true)
+      enrollment = @course.enroll_teacher(student)
+      enrollment.sis_source_id = "something"
+      enrollment.save!
+
+      user_session(@teacher)
+
+      get "/courses/#{@course.id}/users"
+      open_dropdown_menu("#user_#{student.id}")
+      expect(dropdown_item_exists?('editRoles', "#user_#{student.id}")).to be false
+    end
   end
 end

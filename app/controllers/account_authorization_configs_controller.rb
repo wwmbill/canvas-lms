@@ -115,6 +115,10 @@
 #           "description": "_Deprecated_[2015-05-08: This is moving to an account setting] Valid for SAML and CAS providers.",
 #           "example": "https://canvas.instructure.com/login",
 #           "type": "string"
+#         },
+#         "jit_provisioning": {
+#           "description": "Just In Time provisioning. Valid for all providers except Canvas (which has the similar in concept self_registration setting).",
+#           "type": "boolean"
 #         }
 #       }
 #     }
@@ -183,14 +187,14 @@ class AccountAuthorizationConfigsController < ApplicationController
   # @API Add authentication provider
   #
   # Add external authentication provider(s) for the account.
-  # Services may be CAS, Facebook, GitHub, Google, LDAP, OpenID Connect,
-  # LinkedIn, SAML, or Twitter.
+  # Services may be CAS, Facebook, GitHub, Google, LDAP, LinkedIn,
+  # Microsoft, OpenID Connect, SAML, or Twitter.
   #
   # Each authentication provider is specified as a set of parameters as
   # described below. A provider specification must include an 'auth_type'
-  # parameter with a value of 'cas', 'facebook', 'github', 'google', 'ldap',
-  # 'linkedin', 'openid_connect', 'saml', or 'twitter'. The other recognized
-  # parameters depend on this auth_type; unrecognized parameters are discarded.
+  # parameter with a value of 'canvas', 'cas', 'clever', 'facebook', 'github', 'google',
+  # 'ldap', 'linkedin', 'microsoft', 'openid_connect', 'saml', or 'twitter'. The other
+  # recognized parameters depend on this auth_type; unrecognized parameters are discarded.
   # Provider specifications not specifying a valid auth_type are ignored.
   #
   # _Deprecated_[2015-05-08] Any provider specification may include an
@@ -203,7 +207,14 @@ class AccountAuthorizationConfigsController < ApplicationController
   # _Deprecated_ [Use update_sso_settings instead]
   #
   # You can set the 'position' for any configuration. The config in the 1st position
-  # is considered the default.
+  # is considered the default. You can set 'jit_provisioning' for any configuration
+  # besides Canvas.
+  #
+  # For Canvas, the additional recognized parameter is:
+  #
+  # - self_registration
+  #
+  #   'all', 'none', or 'observer' - who is allowed to register as a new user
   #
   # For CAS, the additional recognized parameters are:
   #
@@ -220,6 +231,31 @@ class AccountAuthorizationConfigsController < ApplicationController
   #
   #   A url to redirect to when a user is authorized through CAS but is not
   #   found in Canvas.
+  #
+  # For Clever, the additional recognized parameters are:
+  #
+  # - client_id [Required]
+  #
+  #   The Clever application's Client ID. Not available if configured globally
+  #   for Canvas.
+  #
+  # - client_secret [Required]
+  #
+  #   The Clever application's Client Secret. Not available if configured
+  #   globally for Canvas.
+  #
+  # - district_id [Optional]
+  #
+  #   A district's Clever ID. Leave this blank to let Clever handle the details
+  #   with its District Picker. This is required for Clever Instant Login to
+  #   work in a multi-tenant environment.
+  #
+  # - login_attribute [Optional]
+  #
+  #   The attribute to use to look up the user's login in Canvas. Either
+  #   'id' (the default), 'sis_id', 'email', 'student_number', or
+  #   'teacher_number'. Note that some fields may not be populated for
+  #   all users at Clever.
   #
   # For Facebook, the additional recognized parameters are:
   #
@@ -270,6 +306,11 @@ class AccountAuthorizationConfigsController < ApplicationController
   #
   #   The Google application's Client Secret. Not available if configured
   #   globally for Canvas.
+  #
+  # - hosted_domain [Optional]
+  #
+  #   A Google Apps domain to restrict logins to. See
+  #   https://developers.google.com/identity/protocols/OpenIDConnect?hl=en#hd-param
   #
   # - login_attribute [Optional]
   #
@@ -336,6 +377,30 @@ class AccountAuthorizationConfigsController < ApplicationController
   #   The attribute to use to look up the user's login in Canvas. Either
   #   'id' (the default), or 'emailAddress'
   #
+  # For Microsoft, the additional recognized parameters are:
+  #
+  # - application_id [Required]
+  #
+  #   The application's ID.
+  #
+  # - application_secret [Required]
+  #
+  #   The application's Client Secret (Password)
+  #
+  # - tenant [Optional]
+  #
+  #   See https://azure.microsoft.com/en-us/documentation/articles/active-directory-v2-protocols/
+  #   Valid values are 'common', 'organizations', 'consumers', or an Azure Active Directory Tenant
+  #   (as either a UUID or domain, such as contoso.onmicrosoft.com). Defaults to 'common'
+  #
+  # - login_attribute [Optional]
+  #
+  #   See https://azure.microsoft.com/en-us/documentation/articles/active-directory-v2-tokens/#idtokens
+  #   Valid values are 'sub', 'email', 'oid', or 'preferred_username'. Note
+  #   that email may not always be populated in the user's profile at
+  #   Microsoft. Oid will not be populated for personal Microsoft accounts.
+  #   Defaults to 'sub'
+  #
   # For OpenID Connect, the additional recognized parameters are:
   #
   # - client_id [Required]
@@ -358,6 +423,11 @@ class AccountAuthorizationConfigsController < ApplicationController
   # - scope [Optional]
   #
   #   Space separated additional scopes to request for the token.
+  #
+  # - end_session_endpoint [Optional]
+  #
+  #   URL to send the end user to after logging out of Canvas. See
+  #   https://openid.net/specs/openid-connect-session-1_0.html#RPLogout
   #
   # - login_attribute [Optional]
   #
@@ -465,6 +535,21 @@ class AccountAuthorizationConfigsController < ApplicationController
     data = filter_data(aac_data)
     deselect_parent_registration(data)
     account_config = @account.authentication_providers.build(data)
+    if account_config.class.singleton? && @account.authentication_providers.active.where(auth_type: account_config.auth_type).exists?
+      respond_to do |format|
+        format.html do
+          flash[:error] = t(
+            "Duplicate provider %{provider}", provider: account_config.auth_type
+          )
+          redirect_to(account_authentication_providers_path(@account))
+        end
+        format.json do
+          msg = "duplicate provider #{account_config.auth_type}"
+          render json: { errors: [ { message:  msg } ] }, status: 422
+        end
+      end
+      return
+    end
     update_deprecated_account_settings_data(aac_data, account_config)
 
     if position.present?

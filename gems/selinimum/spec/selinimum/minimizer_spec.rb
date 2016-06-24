@@ -1,19 +1,19 @@
-require "spec_helper"
+require "selinimum/minimizer"
 
 describe Selinimum::Minimizer do
   describe "#filter" do
     class NopeDetector
-      def can_process?(_)
+      def can_process?(_, _)
         true
       end
 
       def dependents_for(file)
-        raise Selinimum::TooManyDependenciesError, file
+        raise Selinimum::TooManyDependentsError, file
       end
     end
 
     class FooDetector
-      def can_process?(file)
+      def can_process?(file, _)
         file =~ /foo/
       end
 

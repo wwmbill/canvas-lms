@@ -1,13 +1,15 @@
-require File.expand_path(File.dirname(__FILE__) + '/../helpers/quiz_questions_common')
+require_relative '../common'
+require_relative '../helpers/quiz_questions_common'
 
 describe 'taking a quiz one question at a time' do
-  include_examples 'quiz question selenium tests'
+  include_context 'in-process server selenium tests'
+  include QuizQuestionsCommon
 
-  before(:each) do
+  before(:once) do
     create_oqaat_quiz(publish: true)
   end
 
-  context 'with a student' do
+  context 'as a student' do
 
     before(:each) do
       user_session(@student)
@@ -17,7 +19,7 @@ describe 'taking a quiz one question at a time' do
 
       before(:each) do
         @quiz.update_attribute(:cant_go_back, false)
-        take_the_quiz
+        begin_quiz
       end
 
       it 'allows going back to previous questions', priority: "1", test_id: 140611 do
@@ -88,9 +90,13 @@ describe 'taking a quiz one question at a time' do
         it_should_show_cant_go_back_warning
         accept_cant_go_back_warning
 
-        expect_new_page_load(true) { fj('a:contains(\'Quizzes\')').click }
+        expect_new_page_load(true) do
+          click_quiz_link("Quizzes")
+        end
 
-        expect_new_page_load { fj('a:contains(\'OQAAT quiz\')').click }
+        expect_new_page_load do
+          click_quiz_link("OQAAT quiz")
+        end
 
         fj('#not_right_side .take_quiz_button a:contains(\'Resume Quiz\')').click
 
@@ -99,7 +105,7 @@ describe 'taking a quiz one question at a time' do
     end
   end
 
-  context 'with a teacher' do
+  context 'as a teacher' do
 
     before(:each) do
       user_session(@teacher)
@@ -127,7 +133,7 @@ describe 'taking a quiz one question at a time' do
         @quiz.update_attribute(:cant_go_back, true)
         preview_the_quiz
       end
-      
+
       it 'prevents going back to previous questions', priority: "1", test_id: 209374 do
         it_should_show_cant_go_back_warning
         accept_cant_go_back_warning

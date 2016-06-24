@@ -18,6 +18,8 @@ module Canvas
   def self.redis
     raise "Redis is not enabled for this install" unless Canvas.redis_enabled?
     @redis ||= begin
+      Bundler.require 'redis'
+      Canvas::Redis.patch
       settings = ConfigFile.load('redis')
       Canvas::RedisConfig.from_settings(settings).redis
     end
@@ -160,6 +162,15 @@ module Canvas
     else
       nil
     end
+  end
+
+  def self.installation_uuid
+    installation_uuid = Setting.get("installation_uuid", "")
+    if installation_uuid == ""
+      installation_uuid = SecureRandom.uuid
+      Setting.set("installation_uuid", installation_uuid)
+    end
+    installation_uuid
   end
 
   def self.timeout_protection_error_ttl(service_name)

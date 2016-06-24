@@ -23,7 +23,8 @@ class LoginController < ApplicationController
 
   before_filter :forbid_on_files_domain, except: :clear_file_session
   before_filter :run_login_hooks, only: :new
-  before_filter :check_sa_delegated_cookie, only: [:new]
+  before_filter :check_sa_delegated_cookie, only: :new
+  before_filter :fix_ms_office_redirects, only: :new
   skip_before_filter :require_reacceptance_of_terms
 
   def new
@@ -70,15 +71,16 @@ class LoginController < ApplicationController
         active.
         find(params[:authentication_provider]).
         auth_type
-      # temporary back-compat if the Canvas AuthenticationProvider hasn't been created yet
-      auth_type ||= 'canvas' if params[:authentication_provider] == 'canvas'
+      params[:id] = params[:authentication_provider] if params[:authentication_provider] != auth_type
     else
       auth_type = @domain_root_account.authentication_providers.active.first.try(:auth_type)
       auth_type ||= 'canvas'
     end
 
     unless flash[:delegated_message]
-      return redirect_to url_for({ controller: "login/#{auth_type}", action: :new }.merge(params.slice(:id)))
+      return redirect_to url_for({ controller: "login/#{auth_type}", action: :new }
+                                     .merge(params.slice(:id))
+                                     .merge(params.slice(:pseudonym_session)))
     end
 
     # we had an error from an SSO - we need to show it

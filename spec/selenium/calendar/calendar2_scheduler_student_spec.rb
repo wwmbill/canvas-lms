@@ -4,9 +4,12 @@ require File.expand_path(File.dirname(__FILE__) + '/../helpers/scheduler_common'
 
 describe "scheduler" do
   include_context "in-process server selenium tests"
+  include Calendar2Common
+  include SchedulerCommon
+
   context "as a student" do
 
-    before (:each) do
+    before(:each) do
       Account.default.tap do |a|
         a.settings[:show_scheduler]   = true
         a.settings[:agenda_view]      = true
@@ -17,11 +20,11 @@ describe "scheduler" do
     end
 
     def reserve_appointment_manual(n, comment = nil)
-      ffj('.fc-event')[n].click
+      ffj('.agenda-event .ig-row')[n].click
       if comment
         replace_content(f('#appointment-comment'), comment)
       end
-      driver.execute_script("$('.event-details .reserve_event_link').trigger('click')")
+      f('.event-details .reserve_event_link').click
       wait_for_ajax_requests
     end
 
@@ -36,18 +39,18 @@ describe "scheduler" do
       click_scheduler_link
       wait_for_ajaximations
       click_appointment_link
-
+      wait_for_ajaximations
       reserve_appointment_manual(0, "my comments")
-      expect(f('.fc-event')).to include_text "Reserved"
-      ffj('.fc-event')[0].click
+      expect(f('.agenda-event .ig-row')).to include_text "Reserved"
+      f('.agenda-event .ig-row').click
       expect(f('.event-details-content')).to include_text "my comments"
 
       load_month_view
-      ffj('.fc-event')[0].click
+      f('.fc-event').click
       expect(f('.event-details-content')).to include_text "my comments"
     end
 
-    it "should allow me to cancel existing reservation and sign up for the appointment group from the calendar", priority: "1", test_id: 140200 do
+    it "should allow me to replace existing reservation when at limit", priority: "1", test_id: 505291 do
       tomorrow = (Date.today + 1).to_s
       create_appointment_group(:max_appointments_per_participant => 1,
                                :new_appointments => [
@@ -59,19 +62,19 @@ describe "scheduler" do
       click_appointment_link
 
       reserve_appointment_manual(0)
-      expect(f('.fc-event')).to include_text "Reserved"
+      expect(f('.agenda-event .ig-row')).to include_text "Reserved"
 
       # try to reserve the second appointment
       reserve_appointment_manual(1)
       fj('.ui-button:contains(Reschedule)').click
       wait_for_ajax_requests
 
-      event1, event2 = ff('.fc-event')
+      event1, event2 = ff('.agenda-event .ig-row')
       expect(event1).to include_text "Available"
       expect(event2).to include_text "Reserved"
     end
 
-    it "should not let me book too many appointments" do
+    it "should not let me book too many appointments", priority: "1", test_id: 502964 do
       tomorrow = (Date.today + 1).to_s
       create_appointment_group(:max_appointments_per_participant => 2,
                                :new_appointments => [
@@ -85,13 +88,13 @@ describe "scheduler" do
 
       reserve_appointment_manual(0)
       reserve_appointment_manual(1)
-      e1, e2, *rest = ff('.fc-event')
+      e1, e2 = ff('.agenda-event .ig-row')
       expect(e1).to include_text "Reserved"
       expect(e2).to include_text "Reserved"
 
       reserve_appointment_manual(2)
       fj('.ui-button:contains("OK")').click # "can't reserve" dialog
-      expect(f('.fc-event:nth-child(3)')).to include_text "Available"
+      expect(fj('.agenda-event .ig-row:eq(2)')).to include_text "Available"
     end
 
     it "should allow other users to fill up available timeslots" do
@@ -137,7 +140,7 @@ describe "scheduler" do
 
       # first slot full, but second available
       click_appointment_link
-      e1, e2 = ff('.fc-event')
+      e1, e2 = ff('.agenda-event .ig-row')
       expect(e1).to include_text "Filled"
       expect(e2).to include_text "Available"
     end
@@ -148,10 +151,9 @@ describe "scheduler" do
       ag.appointments.first.reserve_for(@user, @user)
       get "/calendar2"
       click_scheduler_link
-      wait_for_ajaximations
       click_appointment_link
 
-      fj('.fc-event:visible').click
+      fj('.agenda-event .ig-row').click
       expect(ff('#reservations').size).to be_zero
     end
 
@@ -175,8 +177,7 @@ describe "scheduler" do
         create_appointment_group(
           max_appointments_per_participant: 1,
           new_appointments: [
-            [date + ' 12:00:00', date + ' 13:00:00'],
-            [date + ' 14:00:00', date + ' 15:00:00']
+            [date + ' 12:00:00', date + ' 13:00:00']
           ]
         )
         get "/calendar2"
@@ -186,7 +187,7 @@ describe "scheduler" do
         reserve_appointment_manual(0)
       end
 
-      it "should let me do so from the month view" do
+      it "should let me do so from the month view", priority: "1", test_id: 140200 do
         load_month_view
 
         fj('.fc-event.scheduler-event').click
@@ -198,7 +199,7 @@ describe "scheduler" do
         expect(fj('.fc-event.scheduler-event')).to be_nil
       end
 
-      it "should let me do so from the week view" do
+      it "should let me do so from the week view", priority: "1", test_id: 502483 do
         load_week_view
 
         fj('.fc-event.scheduler-event').click
@@ -208,6 +209,29 @@ describe "scheduler" do
         wait_for_ajaximations
 
         expect(fj('.fc-event.scheduler-event')).to be_nil
+      end
+
+      it "should let me do so from the agenda view", priority: "1", test_id: 502484 do
+        load_agenda_view
+
+        f('.ig-row').click
+        wait_for_ajaximations
+        fj('.unreserve_event_link').click
+        fj('#delete_event_dialog~.ui-dialog-buttonpane .btn-primary').click
+
+        wait_for_ajaximations
+
+        expect(ffj('.ig-row').length).to eq 0
+      end
+
+      it "should let me do so from the scheduler", priority: "1", test_id: 502485 do
+        fj('.agenda-event .ig-row').click
+        fj('.unreserve_event_link').click
+        fj('#delete_event_dialog~.ui-dialog-buttonpane .btn-primary').click
+
+        wait_for_ajaximations
+
+        expect(f('.agenda-event .ig-row')).to include_text "Available"
       end
     end
   end

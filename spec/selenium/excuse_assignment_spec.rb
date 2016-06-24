@@ -3,6 +3,8 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/groups_common')
 
 describe 'Excuse an Assignment' do
   include_context "in-process server selenium tests"
+  include Gradebook2Common
+  include GroupsCommon
 
   before do |example|
     unless example.metadata[:group]
@@ -21,16 +23,19 @@ describe 'Excuse an Assignment' do
 
     it 'Assignment index displays scores as excused', priority: "1", test_id: 246616 do
       get "/courses/#{@course.id}/assignments"
+      wait_for_ajaximations
       expect(f('[id^="assignment_"] span.non-screenreader').text).to eq 'Excused'
     end
 
     it 'Assignment details displays scores as excused', priority: "1", test_id: 201937 do
       get "/courses/#{@course.id}/assignments/#{@assignment.id}"
+      wait_for_ajaximations
       expect(f('#sidebar_content .details .header').text).to eq 'Excused!'
     end
 
     it 'Submission details displays scores as excused', priority: "1", test_id: 246617 do
       get "/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}"
+      wait_for_ajaximations
       expect(f('#content span.published_grade').text).to eq 'Excused'
     end
   end
@@ -40,11 +45,12 @@ describe 'Excuse an Assignment' do
     assignment.grade_student @student, excuse: true
 
     csv = CSV.parse(GradebookExporter.new(@course, @teacher).to_csv)
-    _name, _id, _section, score = csv[-1]
+    _name, _id, _section, _sis_login_id, score = csv[-1]
     expect(score).to eq 'EX'
   end
 
   it 'Gradebook import accounts for excused assignment', priority: "1", test_id: 223509 do
+    skip_if_chrome('fragile upload process')
     @course.assignments.create! title: 'Excuse Me', points_possible: 20
     rows = ['Student Name,ID,Section,Excuse Me',
             "Student,#{@student.id},,EX"]
@@ -241,8 +247,8 @@ describe 'Excuse an Assignment' do
        'and will not be considered in the total calculation'
     end
 
-    it 'is not included in grade calculations', priority: "1", test_id: view == 'srgb' ? 216379 : 1196596 do
-      ['percent', 'letter_grade', 'gpa_scale', 'points'].each do |type|
+    ['percent', 'letter_grade', 'gpa_scale', 'points'].each do |type|
+      it "is not included in grade calculations with type '#{type}'", priority: "1", test_id: view == 'srgb' ? 216379 : 1196596 do
         a1 = @course.assignments.create! title: 'Excuse Me', grading_type: type, points_possible: 20
         a2 = @course.assignments.create! title: 'Don\'t Excuse Me', grading_type: type, points_possible: 20
 
@@ -280,7 +286,6 @@ describe 'Excuse an Assignment' do
           total = f('.canvas_1 .slick-row .slick-cell:last-child').text
         end
         expect(total).to eq '100%'
-        @course.assignments = []
       end
     end
   end
@@ -309,6 +314,7 @@ describe 'Excuse an Assignment' do
 
       get "/courses/#{@course.id}/gradebook/"
       driver.action.move_to(f('.canvas_1 .slick-cell')).perform
+      wait_for_ajaximations
       f('a.gradebook-cell-comment').click
       wait_for_ajaximations
 
@@ -335,8 +341,8 @@ describe 'Excuse an Assignment' do
       end
     end
 
-    it 'variations of \'EX\' can be used to excuse assignments', priority: "1", test_id: 225630 do
-      ['EX', 'ex', 'Ex', 'eX'].each do |ex|
+    ['EX', 'ex', 'Ex', 'eX'].each do |ex|
+      it "'#{ex}' can be used to excuse assignments", priority: "1", test_id: 225630 do
         @course.assignments.create! title: 'Excuse Me', points_possible: 20
 
         get "/courses/#{@course.id}/gradebook/"

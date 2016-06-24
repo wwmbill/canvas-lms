@@ -47,8 +47,8 @@ describe RubricAssessment do
     expect(@assessment.data.first[:comments]).to eq comment
     t = Class.new
     t.extend HtmlTextHelper
-    # data has been round-tripped through YAML, and syck doesn't preserve carriage returns
-    expect(@assessment.data.first[:comments_html]).to eq t.format_message(comment).first.gsub("\r", '')
+    expected = t.format_message(comment).first
+    expect(@assessment.data.first[:comments_html]).to eq expected
   end
 
   context "grading" do
@@ -73,6 +73,20 @@ describe RubricAssessment do
       expect(@assessment.artifact.grader).to eql(@teacher)
       expect(@assessment.artifact.score).to eql(5.0)
       expect(@assessment.data.first[:comments_html]).to be_nil
+    end
+
+    it "should update scores anonymously if graded anonymously" do
+      @assessment = @association.assess({
+          :graded_anonymously => true,
+          :user => @student,
+          :assessor => @teacher,
+          :artifact => @assignment.find_or_create_submission(@student),
+          :assessment => {
+            :assessment_type => 'grading',
+            :criterion_crit1 => { :points => 5 }
+          }
+        })
+      expect(@assessment.artifact.graded_anonymously).to be_truthy
     end
 
     it "should not mutate null/empty string score text to 0" do

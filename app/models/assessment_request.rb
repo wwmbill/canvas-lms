@@ -19,27 +19,17 @@
 class AssessmentRequest < ActiveRecord::Base
   include Workflow
   include SendToStream
-  attr_accessible :rubric_assessment, :user, :asset, :assessor_asset, :comments, :rubric_association, :assessor
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :rubric_assessment_id, :user_id, :asset_id, :asset_type, :assessor_asset_id, :assessor_asset_type,
-    :comments, :workflow_state, :created_at, :updated_at, :uuid, :rubric_association_id, :assessor_id
-  ]
-
-  EXPORTABLE_ASSOCIATIONS = [:user, :asset, :assessor_asset, :submission, :submission_comments, :rubric_assessment]
+  attr_accessible :rubric_assessment, :user, :asset, :assessor_asset, :rubric_association, :assessor
 
   belongs_to :user
-  belongs_to :asset, :polymorphic => true
-  validates_inclusion_of :asset_type, :allow_nil => true, :in => ['Submission']
-  belongs_to :assessor_asset, :polymorphic => true
-  validates_inclusion_of :assessor_asset_type, :allow_nil => true, :in => ['Submission', 'User']
+  belongs_to :asset, polymorphic: [:submission]
+  belongs_to :assessor_asset, polymorphic: [:submission, :user], polymorphic_prefix: true
   belongs_to :assessor, :class_name => 'User'
-  belongs_to :submission, :foreign_key => 'asset_id'
   belongs_to :rubric_association
   has_many :submission_comments
   has_many :ignores, as: :asset
   belongs_to :rubric_assessment
   validates_presence_of :user_id, :asset_id, :asset_type, :workflow_state
-  validates_length_of :comments, :maximum => maximum_text_length, :allow_nil => true, :allow_blank => true
 
   before_save :infer_uuid
   has_a_broadcast_policy
@@ -63,7 +53,7 @@ class AssessmentRequest < ActiveRecord::Base
     }
   end
 
-  scope :incomplete, where(:workflow_state => 'assigned')
+  scope :incomplete, -> { where(:workflow_state => 'assigned') }
   scope :for_assessee, lambda { |user_id| where(:user_id => user_id) }
   scope :for_assessor, lambda { |assessor_id| where(:assessor_id => assessor_id) }
   scope :for_asset, lambda { |asset_id| where(:asset_id => asset_id)}

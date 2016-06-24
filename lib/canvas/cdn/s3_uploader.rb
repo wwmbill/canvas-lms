@@ -1,5 +1,4 @@
 require 'parallel'
-require_dependency 'lib/canvas/cdn/gzip' if CANVAS_RAILS3
 
 module Canvas
   module Cdn
@@ -29,7 +28,7 @@ module Canvas
       end
 
       def fingerprinted?(path)
-        /-[0-9a-fA-F]{10}$/.match(path.basename(path.extname).to_s)
+        /-[0-9a-fA-F]{10,32}$/.match(path.basename(path.extname).to_s)
       end
 
       def font?(path)
@@ -72,7 +71,7 @@ module Canvas
 
       def handle_compression(file, options)
         if file.size > 150 # gzipping small files is not worth it
-          gzipped = (CANVAS_RAILS3 ? Canvas::Cdn::Gzip : ActiveSupport::Gzip).compress(file.read, Zlib::BEST_COMPRESSION)
+          gzipped = ActiveSupport::Gzip.compress(file.read, Zlib::BEST_COMPRESSION)
           compression = 100 - (100.0 * gzipped.size / file.size).round
           # if we couldn't compress more than 5%, the gzip decoding cost to the
           # client makes it is not worth serving gzipped

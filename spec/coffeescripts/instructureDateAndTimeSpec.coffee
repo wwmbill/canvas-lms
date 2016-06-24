@@ -19,7 +19,7 @@ define [
     fudged = $.fudgeDateForProfileTimezone(@original)
     equal fudged.toString('yyyy-MM-dd HH:mm:ss'), tz.format(@original, '%F %T')
 
-  test 'should parse dates before the year 1000', ->
+  test 'should parse dates before the year 1000', -> 
     # using specific string (and specific timezone to guarantee it) since tz.format has a bug pre-1000
     tz.changeZone(detroit, 'America Detroit')
     oldDate = new Date(Date.UTC(900, 1, 1, 0, 0, 0))
@@ -204,7 +204,7 @@ define [
     equal $.datetimeString(new Date(0)), 'Dec 31, 1969 at 7:00pm'
 
   test 'should translate into the profile locale', ->
-    tz.changeLocale(portuguese, 'pt_PT')
+    tz.changeLocale(portuguese, 'pt_PT', 'pt')
     I18nStubber.setLocale 'pt'
     I18nStubber.stub 'pt',
       'date.formats.medium': "%-d %b %Y"
@@ -223,7 +223,7 @@ define [
 
   test 'should accept localized strings and return them fudged', ->
     tz.changeZone(detroit, 'America/Detroit')
-    tz.changeLocale(portuguese, 'pt_PT')
+    tz.changeLocale(portuguese, 'pt_PT', 'pt')
     I18nStubber.setLocale 'pt'
     I18nStubber.stub 'pt',
       # this isn't the real format, but we want the %Y in here to make it

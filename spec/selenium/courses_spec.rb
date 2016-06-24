@@ -20,7 +20,6 @@ describe "courses" do
     end
 
     context 'draft state' do
-
       before(:each) do
         course_with_teacher_logged_in
       end
@@ -46,6 +45,14 @@ describe "courses" do
 
         @course.reload
         expect(@course.lock_all_announcements).to be_truthy
+      end
+
+      it "should display a creative commons license when set", priority: "1", test_id: 272274 do
+        @course.license =  'cc_by_sa'
+        @course.save!
+        get "/courses/#{@course.id}"
+        wait_for_ajaximations
+        expect(f('.public-license-text').text).to include('This course content is offered under a')
       end
 
       it "should allow unpublishing of a course through the course status actions" do
@@ -87,14 +94,31 @@ describe "courses" do
         validate_action_button(:first, 'Unpublished')
       end
 
+      it "should allow publishing/unpublishing with only change_course_state permission" do
+        @course.account.role_overrides.create!(:permission => :manage_course_content, :role => teacher_role, :enabled => false)
+        @course.account.role_overrides.create!(:permission => :manage_courses, :role => teacher_role, :enabled => false)
+
+        get "/courses/#{@course.id}"
+        expect_new_page_load { ff('#course_status_actions button').first.click }
+        validate_action_button(:first, 'Unpublished')
+        expect_new_page_load { ff('#course_status_actions button').last.click }
+        validate_action_button(:last, 'Published')
+      end
+
+      it "should not allow publishing/unpublishing without change_course_state permission" do
+        @course.account.role_overrides.create!(:permission => :change_course_state, :role => teacher_role, :enabled => false)
+
+        get "/courses/#{@course.id}"
+        expect(f('#course_status_actions')).to be_nil
+      end
     end
 
     describe 'course wizard' do
       def go_to_checklist
         get "/courses/#{@course.id}"
         f(".wizard_popup_link").click()
-        wizard_box = f(".ic-wizard-box")
-        keep_trying_until { expect(wizard_box).to be_displayed }
+        keep_trying_until { expect(f(".ic-wizard-box")).to be_displayed }
+        wait_for_ajaximations(500)
       end
 
       def check_if_item_complete(item)
@@ -107,64 +131,11 @@ describe "courses" do
         expect(f("#wizard_#{item}.ic-wizard-box__content-trigger--checked")).to be_nil
       end
 
-      it "should properly hide the wizard and remember its hidden state" do
-        # For now we are not allowing the wizard to popup automatically
-        # so this spec doesn't apply, it may in the future though.
-        pending
-        course_with_teacher_logged_in
-        create_new_course
-        wizard_box = f(".ic-wizard-box")
-        keep_trying_until { expect(wizard_box).to be_displayed }
-        f(".ic-wizard-box__close a").click
-        refresh_page
-        wait_for_ajaximations # we need to give the wizard a chance to pop up
-        wizard_box = f(".ic-wizard-box")
-        expect(wizard_box).to eq nil
-        # un-remember the setting
-        driver.execute_script "localStorage.clear()"
-      end
-
-      it "should open and close wizard after initial close" do
-        # For now we are not allowing the wizard to popup automatically
-        # so this spec doesn't apply, it may in the future though.
-        pending
-        def find_wizard_box
-          wizard_box = keep_trying_until do
-            wizard_box = f(".ic-wizard-box")
-            expect(wizard_box).to be_displayed
-            wizard_box
-          end
-          wizard_box
-        end
-
-        course_with_teacher_logged_in
-        create_new_course
-
-        wait_for_ajaximations
-        wizard_box = find_wizard_box
-        f(".ic-wizard-box__close a").click
-        wait_for_ajaximations
-        wizard_box = f(".ic-wizard-box")
-        expect(wizard_box).to eq nil
-        checklist_button = f('.wizard_popup_link')
-        expect(checklist_button).to be_displayed
-        checklist_button.click
-        wait_for_ajaximations
-        wizard_box = find_wizard_box
-        f(".ic-wizard-box__close a").click
-        wait_for_ajaximations
-        wizard_box = f(".ic-wizard-box")
-        expect(wizard_box).to eq nil
-        expect(checklist_button).to be_displayed
-      end
-
       it "should open up the choose home page dialog from the wizard" do
+        skip_if_chrome('research')
         course_with_teacher_logged_in
         create_new_course
 
-        # Because of the specs about automatically opening are currently
-        # pending, we need to cause the wizard to open by way of click. When
-        # those specs are no longer pendings, the click line should be removed.
         go_to_checklist
 
         f("#wizard_home_page").click
@@ -205,38 +176,41 @@ describe "courses" do
       end
 
       it "should complete 'Select Navigation Links' checklist item" do
+        skip_if_chrome('research')
         course_with_teacher_logged_in
         get "/courses/#{@course.id}"
 
         # Navigate to Navigation tab
         go_to_checklist
-        f('#wizard_select_navigation').click()
-        f('.ic-wizard-box__message-button a').click()
+        f('#wizard_select_navigation').click
+        f('.ic-wizard-box__message-button a').click
 
         # Modify Naviagtion
-        f('#navigation_tab').click()
-        f('.navitem.enabled.modules .al-trigger.al-trigger-gray').click()
-        f('.navitem.enabled.modules .admin-links .disable_nav_item_link').click()
-        f('#tab-navigation .btn').click()
+        f('#navigation_tab').click
+        f('.navitem.enabled.modules .al-trigger.al-trigger-gray').click
+        f('.navitem.enabled.modules .admin-links .disable_nav_item_link').click
+        f('#tab-navigation .btn').click
 
         go_to_checklist
         check_if_item_complete('select_navigation')
       end
 
       it "should complete 'Add Course Calendar Events' checklist item" do
+        skip_if_chrome('research')
+
         course_with_teacher_logged_in
         get "/courses/#{@course.id}"
 
         # Navigate to Calendar tab
         go_to_checklist
-        f('#wizard_course_calendar').click()
-        f('.ic-wizard-box__message-button a').click()
+        f('#wizard_course_calendar').click
+        f('.ic-wizard-box__message-button a').click
 
         # Add Event
-        f("#create_new_event_link").click()
+        f("#create_new_event_link").click
         wait_for_ajaximations
         replace_content(f('#edit_calendar_event_form #calendar_event_title'), "Event")
-        f("#edit_calendar_event_form button.event_button").click()
+        f("#edit_calendar_event_form button.event_button").click
         wait_for_ajaximations
 
         go_to_checklist
@@ -244,13 +218,15 @@ describe "courses" do
       end
 
       it "should complete 'Publish the Course' checklist item" do
+        skip_if_chrome('research')
         course_with_teacher_logged_in
         get "/courses/#{@course.id}"
 
         # Publish from Checklist
         go_to_checklist
-        f('#wizard_publish_course').click()
-        f('.ic-wizard-box__message-button button').click()
+        f('#wizard_publish_course').click
+        wait_for_ajaximations
+        f('.ic-wizard-box__message-button button').click
 
         go_to_checklist
         check_if_item_complete('publish_course')
@@ -301,7 +277,7 @@ describe "courses" do
       course2 = course_with_teacher(:user => teacher, :active_all => 1, :course_name => 'course2').course
       student_in_course(:user => student, :active_all => 1)
 
-      create_session(student.pseudonyms.first, false)
+      create_session(student.pseudonyms.first)
 
       get "/courses/#{course1.id}/grades/#{student.id}"
 

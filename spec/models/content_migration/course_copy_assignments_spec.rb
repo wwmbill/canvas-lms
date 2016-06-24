@@ -43,6 +43,22 @@ describe ContentMigration do
       expect(to_outcomes).to eql [mig_id(@outcome)]
     end
 
+    it "should copy rubric outcomes (even if in a group) in selective copy" do
+      @course = @copy_from
+      outcome_group_model(:context => @copy_from)
+      outcome_with_rubric
+      from_assign = @copy_from.assignments.create! title: 'some assignment'
+      @rubric.associate_with(from_assign, @copy_from, purpose: 'grading')
+
+      @cm.copy_options = {:assignments => {mig_id(from_assign) => true}}
+
+      run_course_copy
+
+      to_assign = @copy_to.assignments.where(migration_id: mig_id(from_assign)).first!
+      to_outcomes = to_assign.rubric.learning_outcome_alignments.map(&:learning_outcome).map(&:migration_id)
+      expect(to_outcomes).to eql [mig_id(@outcome)]
+    end
+
     it "should link assignments to assignment groups when copying all assignments" do
       g = @copy_from.assignment_groups.create!(:name => "group")
       from_assign = @copy_from.assignments.create!(:title => "some assignment", :assignment_group_id => g.id)
@@ -141,19 +157,9 @@ describe ContentMigration do
       expect(new_assignment.group_category.name).to eq "Project Groups"
     end
 
-    it "should not copy moderated_grading setting if feature disabled" do
+    it "should copy moderated_grading setting" do
       assignment_model(:course => @copy_from, :points_possible => 40,
                        :submission_types => 'file_upload', :grading_type => 'points', :moderated_grading => true)
-      @copy_to.disable_feature! :moderated_grading
-      run_course_copy
-      new_assignment = @copy_to.assignments.where(migration_id: mig_id(@assignment)).first
-      expect(new_assignment).not_to be_moderated_grading
-    end
-
-    it "should copy moderated_grading setting if feature enabled" do
-      assignment_model(:course => @copy_from, :points_possible => 40,
-                       :submission_types => 'file_upload', :grading_type => 'points', :moderated_grading => true)
-      @copy_to.enable_feature! :moderated_grading
       run_course_copy
       new_assignment = @copy_to.assignments.where(migration_id: mig_id(@assignment)).first
       expect(new_assignment).to be_moderated_grading

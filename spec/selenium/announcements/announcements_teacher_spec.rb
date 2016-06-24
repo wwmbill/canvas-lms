@@ -1,11 +1,12 @@
-require File.expand_path(File.dirname(__FILE__) + '/../common')
-require File.expand_path(File.dirname(__FILE__) + '/../helpers/announcements_common')
+require_relative '../common'
+require_relative '../helpers/announcements_common'
 
 describe "announcements" do
   include_context "in-process server selenium tests"
+  include AnnouncementsCommon
 
   context "announcements as a teacher" do
-    before (:each) do
+    before(:each) do
       course_with_teacher_logged_in
     end
 
@@ -34,10 +35,10 @@ describe "announcements" do
 
       it "should bulk lock topics", priority: "1", test_id: 220361 do
         5.times { |i| @checkboxes[i].click }
-        f('#lock').click
+        move_to_click('label[for=lock]')
         wait_for_ajax_requests
         #TODO: check the UI to make sure the topics have a locked symbol
-        expect(what_to_create.where(:locked => true).count).to eq 5
+        expect(what_to_create.where(locked: true).count).to eq 5
       end
 
       it "should search by title", priority: "1", test_id: 150525 do
@@ -280,6 +281,7 @@ describe "announcements" do
     end
 
     it "should always see student replies when 'initial post required' is turned on", priority: "1", test_id: 150524 do
+      skip_if_chrome('Student view breaks this test')
       student_entry = 'this is my reply'
 
       create_announcement_initial

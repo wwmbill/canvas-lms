@@ -76,7 +76,8 @@ module Api
   # returned in the result.
   def self.map_ids(ids, collection, root_account, current_user = nil)
     sis_mapping = sis_find_sis_mapping_for_collection(collection)
-    columns = sis_parse_ids(ids, sis_mapping[:lookups], current_user)
+    columns = sis_parse_ids(ids, sis_mapping[:lookups], current_user,
+                            root_account: root_account)
     result = columns.delete(sis_mapping[:lookups]["id"]) || []
     unless columns.empty?
       relation = relation_for_sis_mapping_and_columns(collection, columns, sis_mapping, root_account)
@@ -104,7 +105,10 @@ module Api
         :scope => 'root_account_id' }.freeze,
     'users' =>
       { :lookups => { 'sis_user_id' => 'pseudonyms.sis_user_id',
-                      'sis_login_id' => 'pseudonyms.unique_id',
+                      'sis_login_id' => {
+                          column: 'LOWER(pseudonyms.unique_id)',
+                          transform: ->(id) { QuotedValue.new("LOWER(#{Pseudonym.connection.quote(id)})") }
+                      },
                       'id' => 'users.id',
                       'sis_integration_id' => 'pseudonyms.integration_id',
                       'lti_context_id' => 'users.lti_context_id',
@@ -138,7 +142,8 @@ module Api
   MAX_ID_LENGTH = 18
   ID_REGEX = %r{\A\d{1,#{MAX_ID_LENGTH}}\z}
 
-  def self.sis_parse_id(id, lookups, _current_user = nil)
+  def self.sis_parse_id(id, lookups, _current_user = nil,
+                        root_account: nil)
     # returns column_name, column_value
     return lookups['id'], id if id.is_a?(Numeric) || id.is_a?(ActiveRecord::Base)
     id = id.to_s.strip
@@ -156,14 +161,20 @@ module Api
 
     column = lookups[sis_column]
     return nil, nil unless column
+    if column.is_a?(Hash)
+      sis_id = column[:transform].call(sis_id)
+      column = column[:column]
+    end
     return column, sis_id
   end
 
-  def self.sis_parse_ids(ids, lookups, current_user = nil)
+  def self.sis_parse_ids(ids, lookups, current_user = nil, root_account: nil)
     # returns {column_name => [column_value,...].uniq, ...}
     columns = {}
     ids.compact.each do |id|
-      column, sis_id = sis_parse_id(id, lookups, current_user)
+      column, sis_id = sis_parse_id(id, lookups,
+                                    current_user,
+                                    root_account: root_account)
       next unless column && sis_id
       columns[column] ||= []
       columns[column] << sis_id
@@ -250,10 +261,14 @@ module Api
     Setting.get('api_max_per_page', '50').to_i
   end
 
+  def self.per_page
+    Setting.get('api_per_page', '10').to_i
+  end
+
   def self.per_page_for(controller, options={})
-    per_page = controller.params[:per_page] || options[:default] || Setting.get('api_per_page', '10')
+    per_page_requested = controller.params[:per_page] || options[:default] || per_page
     max = options[:max] || max_per_page
-    [[per_page.to_i, 1].max, max.to_i].min
+    [[per_page_requested.to_i, 1].max, max.to_i].min
   end
 
   # Add [link HTTP Headers](http://www.w3.org/Protocols/9707-link-header.html) for pagination
@@ -379,7 +394,7 @@ module Api
     media_object_or_hash = OpenStruct.new(media_object_or_hash) if media_object_or_hash.is_a?(Hash)
     {
       'content-type' => "#{media_object_or_hash.media_type}/mp4",
-      'display_name' => media_object_or_hash.title,
+      'display_name' => media_object_or_hash.title.presence || media_object_or_hash.user_entered_title,
       'media_id' => media_object_or_hash.media_id,
       'media_type' => media_object_or_hash.media_type,
       'url' => user_media_download_url(:user_id => @current_user.id,
@@ -423,8 +438,9 @@ module Api
 
   def resolve_placeholders(content)
     host, protocol = get_host_and_protocol_from_request
-    # content is a json-encoded string; slashes are escaped
-    content.gsub("#{PLACEHOLDER_PROTOCOL}:\\/\\/#{PLACEHOLDER_HOST}", "#{protocol}:\\/\\/#{host}")
+    # content is a json-encoded string; slashes are escaped (at least in Rails 4.0)
+    content.gsub("#{PLACEHOLDER_PROTOCOL}:\\/\\/#{PLACEHOLDER_HOST}", "#{protocol}:\\/\\/#{host}").
+            gsub("#{PLACEHOLDER_PROTOCOL}://#{PLACEHOLDER_HOST}", "#{protocol}://#{host}")
   end
 
   def user_can_download_attachment?(attachment, context, user)
@@ -459,7 +475,7 @@ module Api
                 end
       end
 
-      unless obj && ((is_public && !obj.locked_for?(user)) || user_can_download_attachment?(obj, context, user))
+      unless obj && !obj.deleted? && ((is_public && !obj.locked_for?(user)) || user_can_download_attachment?(obj, context, user))
         if obj && obj.previewable_media? && (uri = URI.parse(match.url) rescue nil)
           uri.query = (uri.query.to_s.split("&") + ["no_preview=1"]).join("&")
           next uri.to_s
@@ -488,7 +504,7 @@ module Api
     html = rewriter.translate_content(html)
 
     url_helper = Html::UrlProxy.new(self, context, host, protocol)
-    account = Context.get_account(context, @domain_root_account)
+    account = Context.get_account(context) || @domain_root_account
     include_mobile = respond_to?(:mobile_device?, true) && mobile_device?
     Html::Content.rewrite_outgoing(html, account, url_helper, include_mobile: include_mobile)
   end

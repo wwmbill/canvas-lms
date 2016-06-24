@@ -1,22 +1,30 @@
-/** @jsx React.DOM */
 define([
   'react',
   'underscore',
   './assignmentGradeCell'
 ], function (React, _, AssignmentGradeCell) {
 
-  const GRADEBOOK_CELL_CLASS = 'gradebook-cell',
-        ACTIVE_CLASS = ' active',
-        LATE_CLASS = ' late',
-        RESUBMIITED_CLASS = ' resubmitted';
+  var GRADEBOOK_CELL_CLASS = 'gradebook-cell',
+      ACTIVE_CLASS = ' active',
+      LATE_CLASS = ' late',
+      RESUBMIITED_CLASS = ' resubmitted',
+      CONCLUDED_OR_INACTIVE_CLASS = ' grayed-out',
+      ASSIGNMENT_TYPES = [
+        'percent',
+        'pass_fail',
+        'letter_grade',
+        'points',
+        'gpa_scale',
+      ];
 
   var GridCell = React.createClass({
     propTypes: {
       activeCell: React.PropTypes.number.isRequired,
+      cellData: React.PropTypes.any,
       cellIndex: React.PropTypes.number.isRequired,
+      columnData: React.PropTypes.object,
       rowData: React.PropTypes.object.isRequired,
-      renderer: React.PropTypes.func.isRequired,
-      cellData: React.PropTypes.any
+      renderer: React.PropTypes.func.isRequired
     },
 
     getInitialState() {
@@ -29,57 +37,74 @@ define([
       this.props.setActiveCell(this.state.cellIndex);
     },
 
-    getSubmissionForAssignment() {
-      var assignmentId = this.props.cellData.id;
-      return _.find(this.props.rowData.submissions, (s) => s.assignment_id === assignmentId);
+    isAssignment(columnData) {
+      return _.contains(ASSIGNMENT_TYPES, columnData.columnType);
     },
 
-    getClassName(isActiveCell, submission) {
+    isConcluded() {
+      return this.props.rowData.isConcluded;
+    },
+
+    isInactive() {
+      return this.props.rowData.isInactive;
+    },
+
+    isConcludedOrInactive() {
+      return this.isConcluded() || this.isInactive();
+    },
+
+    getClassName(isActiveCell, cellData, isAssignment) {
       var className = GRADEBOOK_CELL_CLASS;
 
       if (isActiveCell) {
         className += ACTIVE_CLASS;
       }
 
-      if (submission) {
-        if (submission.late) {
+      if (isAssignment && cellData) {
+        if (cellData.late) {
           className += LATE_CLASS;
-        } else if (!submission.grade_matches_current_submission) {
+        } else if (cellData.grade_matches_current_submission !== null && !(cellData.grade_matches_current_submission)) {
           className += RESUBMIITED_CLASS;
         }
+      }
+
+      if (this.isConcludedOrInactive()) {
+        className += CONCLUDED_OR_INACTIVE_CLASS;;
       }
 
       return className;
     },
 
-    renderAssignmentCell(Renderer, isActiveCell, submission) {
+    renderAssignmentCell(Renderer, isActiveCell) {
        return (<AssignmentGradeCell
-                   submission={submission}
-                   renderer={Renderer}
                    activeCell={isActiveCell}
                    cellData={this.props.cellData}
+                   columnData={this.props.columnData}
+                   renderer={Renderer}
                    rowData={this.props.rowData} />);
     },
 
     renderGenericCell(Renderer, isActiveCell) {
       return (<Renderer isActiveCell={isActiveCell}
                         cellData={this.props.cellData}
+                        columnData={this.props.columnData}
                         rowData={this.props.rowData} />);
     },
 
     render() {
       var Renderer = this.props.renderer,
           className = GRADEBOOK_CELL_CLASS,
-          isAssignmentCell = this.props.cellData,
+          isAssignmentCell = this.isAssignment(this.props.columnData),
           isActiveCell = this.props.activeCell === this.state.cellIndex,
           renderCell = (isAssignmentCell) ? this.renderAssignmentCell : this.renderGenericCell,
-          submission = (isAssignmentCell) ? this.getSubmissionForAssignment() : null;
+          submission = this.props.cellData;
 
       return (
-        <div className={this.getClassName(isActiveCell, submission)}
+        <div className={this.getClassName(isActiveCell, submission, isAssignmentCell)}
              onKeyDown={this.handleKeyPress}
-             onClick={this.handleClick}>
-          {renderCell(Renderer, isActiveCell, submission)}
+             onClick={this.handleClick}
+             key='null'>
+          {renderCell(Renderer, isActiveCell)}
         </div>
       );
     }

@@ -2,9 +2,10 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/wiki_and_tiny_common
 
 describe "Wiki pages and Tiny WYSIWYG editor Files" do
   include_context "in-process server selenium tests"
+  include WikiAndTinyCommon
 
   context "wiki and tiny files as a student" do
-    before (:each) do
+    before(:each) do
       course(:active_all => true, :name => 'wiki course')
       @student = user_with_pseudonym(:active_user => true, :username => 'student@example.com', :name => 'student@example.com', :password => 'asdfasdf')
       @teacher = user_with_pseudonym(:active_user => true, :username => 'teacher@example.com', :name => 'teacher@example.com', :password => 'asdfasdf')
@@ -25,7 +26,7 @@ describe "Wiki pages and Tiny WYSIWYG editor Files" do
   end
 
   context "wiki sidebar files and locking/hiding" do
-    before (:each) do
+    before(:each) do
       course_with_teacher(:active_all => true, :name => 'wiki course')
       @student = user_with_pseudonym(:active_user => true, :username => 'student@example.com', :name => 'student@example.com', :password => 'asdfasdf')
       @course.enroll_student(@student).accept
@@ -67,7 +68,7 @@ describe "Wiki pages and Tiny WYSIWYG editor Files" do
       get "/courses/#{@course.id}/discussion_topics/new"
       f('#editor_tabs .ui-tabs-nav li:nth-child(2) a').click
       expect(f('li.folder')).not_to be_nil
-      f('li.folder span').click
+      f('li.folder span.plus').click
       wait_for_ajaximations
       expect(ff('li.folder li.folder').count).to eq 1
       expect(f('li.folder li.folder .name').text).to include_text("visible subfolder")
@@ -79,7 +80,7 @@ describe "Wiki pages and Tiny WYSIWYG editor Files" do
       get "/courses/#{@course.id}/discussion_topics/new"
       f('#editor_tabs .ui-tabs-nav li:nth-child(2) a').click
       expect(f('li.folder')).not_to be_nil
-      f('li.folder span').click
+      f('li.folder span.plus').click
       wait_for_ajaximations
       expect(ff('li.folder li.folder').count).to eq 1
       expect(f('li.folder li.folder .name').text).to include_text("visible subfolder")
@@ -94,7 +95,7 @@ describe "Wiki pages and Tiny WYSIWYG editor Files" do
 
       get "/courses/#{@course.id}/discussion_topics/new"
       f('#editor_tabs .ui-tabs-nav li:nth-child(2) a').click
-      f('li.folder span').click
+      f('li.folder span.plus').click
       wait_for_ajaximations
       expect(ff('li.folder li.file').count).to eq 1
       expect(f('li.folder li.file .name').text).to include_text("foo.txt")
@@ -110,7 +111,7 @@ describe "Wiki pages and Tiny WYSIWYG editor Files" do
       get "/courses/#{@course.id}/discussion_topics/new"
       f('#editor_tabs .ui-tabs-nav li:nth-child(2) a').click
       keep_trying_until do
-        f('li.folder span').click
+        f('li.folder span.plus').click
         wait_for_ajaximations
         expect(ff('li.folder li.file').count).to eq 1
       end
@@ -119,7 +120,7 @@ describe "Wiki pages and Tiny WYSIWYG editor Files" do
   end
 
   context "wiki sidebar images and locking/hiding" do
-    before (:each) do
+    before(:each) do
       course_with_teacher(:active_all => true, :name => 'wiki course')
       @student = user_with_pseudonym(:active_user => true, :username => 'student@example.com', :name => 'student@example.com', :password => 'asdfasdf')
       @course.enroll_student(@student).accept

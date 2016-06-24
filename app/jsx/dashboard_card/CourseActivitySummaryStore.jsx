@@ -1,5 +1,3 @@
-/** @jsx React.DOM */
-
 define([
   'react',
   'underscore',
@@ -17,6 +15,7 @@ define([
     if (_.has(CourseActivitySummaryStore.getState()['streams'], courseId)) {
       return CourseActivitySummaryStore.getState()['streams'][courseId]
     } else {
+      CourseActivitySummaryStore.getState()['streams'][courseId] = {}
       CourseActivitySummaryStore._fetchForCourse(courseId)
       return {}
     }

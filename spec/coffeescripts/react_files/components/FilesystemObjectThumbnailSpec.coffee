@@ -48,7 +48,8 @@ define [
   test "adds on className to i tag if set in props", ->
     ok $(@thumbnail.getDOMNode()).hasClass("customClassname"), "finds the custom className"
 
-  module 'Filesystem Object Thumbnail: other',
+  module 'Filesystem Object Thumbnail: other'
+
   test "adds on className to i tag if set in props", ->
     fso = new FilesystemObject(id: 65)
     fso.url = -> "foo"
@@ -89,5 +90,5 @@ define [
       React.unmountComponentAtNode(@thumbnail.getDOMNode().parentNode)
 
   test "fetches thumbnail_url and puts it into state", ->
-    equal @thumbnail.state.thumbnail_url, "sweet_thumbnail_url", "fetches and set thumbnail url into state"
-
+    @clock.tick(1000)
+    ok @thumbnail.state.thumbnail_url is "sweet_thumbnail_url", "fetches and set thumbnail url into state"

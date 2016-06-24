@@ -16,7 +16,8 @@ define [
         editing: false
         round: (number)-> Math.round(number * 100)/100
 
-      @dataRow = React.render(DataRow(props), $('<table>').appendTo('#fixtures')[0])
+      DataRowElement = React.createElement(DataRow, props)
+      @dataRow = React.render(DataRowElement, $('<table>').appendTo('#fixtures')[0])
 
     teardown: ->
       React.unmountComponentAtNode(@dataRow.getDOMNode().parentNode)
@@ -49,7 +50,8 @@ define [
         onRowNameChange: ->
         onDeleteRow: ->
 
-      @dataRow = React.renderComponent(DataRow(props), $('<table>').appendTo('#fixtures')[0])
+      DataRowElement = React.createElement(DataRow, props)
+      @dataRow = React.render(DataRowElement, $('<table>').appendTo('#fixtures')[0])
 
     teardown: ->
       React.unmountComponentAtNode(@dataRow.getDOMNode().parentNode)
@@ -93,27 +95,9 @@ define [
     Simulate.change(@dataRow.refs.nameInput.getDOMNode(), {target: {value: 'F'}})
     ok changeMinScore.calledOnce
 
-  test 'shows the link to insert a row on focus of the current row', ->
-    deepEqual @dataRow.refs.insertRowLink, undefined
-    Simulate.focus(@dataRow.refs.editContainer.getDOMNode())
-    ok @dataRow.refs.insertRowLink
-
-  test 'shows the link to insert a row on mouseEnter of the current row', ->
-    deepEqual @dataRow.refs.insertRowLink, undefined
-    #Simulate does not currently support mouseEnter, this is a workaround
-    SimulateNative.mouseOver(@dataRow.refs.editContainer.getDOMNode())
-    ok @dataRow.refs.insertRowLink
-
-  test 'hides the link to insert a row on mouseLeave', ->
-    Simulate.focus(@dataRow.refs.editContainer.getDOMNode())
-    ok @dataRow.refs.insertRowLink
-    #Simulate does not currently support mouseEnter, this is a workaround
-    SimulateNative.mouseOut(@dataRow.refs.editContainer.getDOMNode())
-    deepEqual @dataRow.refs.insertRowLink, undefined
-
-  test 'calls onDeleteRow when the delete link is clicked', ->
+  test 'calls onDeleteRow when the delete button is clicked', ->
     deleteRow = @spy(@dataRow.props, 'onDeleteRow')
-    Simulate.click(@dataRow.refs.deleteLink.getDOMNode())
+    Simulate.click(@dataRow.refs.deleteButton.getDOMNode())
     ok deleteRow.calledOnce
 
   module 'DataRow with a sibling',
@@ -125,7 +109,8 @@ define [
         editing: false
         round: (number)-> Math.round(number * 100)/100
 
-      @dataRow = React.renderComponent(DataRow(props), $('<table>').appendTo('#fixtures')[0])
+      DataRowElement = React.createElement(DataRow, props)
+      @dataRow = React.render(DataRowElement, $('<table>').appendTo('#fixtures')[0])
 
     teardown: ->
       React.unmountComponentAtNode(@dataRow.getDOMNode().parentNode)

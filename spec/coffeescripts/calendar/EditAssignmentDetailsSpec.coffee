@@ -1,11 +1,12 @@
 define [
   'jquery'
   'compiled/calendar/EditAssignmentDetails'
+  'compiled/util/fcUtil'
   'timezone'
   'vendor/timezone/America/Detroit'
   'vendor/timezone/fr_FR'
   'helpers/I18nStubber'
-], ($, EditAssignmentDetails, tz, detroit, french, I18nStubber) ->
+], ($, EditAssignmentDetails, fcUtil, tz, detroit, french, I18nStubber) ->
 
   module "EditAssignmentDetails",
     setup: ->
@@ -14,7 +15,7 @@ define [
       @event =
         possibleContexts: -> []
         isNewEvent: -> true
-        startDate: -> $.fudgeDateForProfileTimezone('2015-08-07T17:00:00Z')
+        startDate: -> fcUtil.wrap('2015-08-07T17:00:00Z')
         allDay: false
 
     teardown: ->
@@ -48,7 +49,7 @@ define [
 
   test "should localize start date", ->
     I18nStubber.pushFrame()
-    tz.changeLocale(french, 'fr_FR')
+    tz.changeLocale(french, 'fr_FR', 'fr')
     I18nStubber.setLocale 'fr_FR'
     I18nStubber.stub 'fr_FR', 'date.formats.full': '%-d %b %Y %-k:%M'
 

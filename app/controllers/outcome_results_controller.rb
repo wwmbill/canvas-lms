@@ -37,13 +37,19 @@
 #           "description": "The student's score"
 #         },
 #         "submitted_or_assessed_at": {
-#           "description": "The datetime the resulting OutcomeResult was submitted at, or absent that, when it was assessed.",
 #           "example": "2013-02-01T00:00:00-06:00",
-#           "type": "datetime"
+#           "type": "datetime",
+#           "description": "The datetime the resulting OutcomeResult was submitted at, or absent that, when it was assessed."
 #         },
 #         "links": {
-#           "example": "{\"user\"=>\"3\", \"learning_outcome\"=>\"97\", \"alignment\"=>\"53\"}",
+#           "example": {"user": "3", "learning_outcome": "97", "alignment": "53"},
+#           "type": "object",
 #           "description": "Unique identifiers of objects associated with this result"
+#         },
+#         "percent": {
+#           "example": "0.65",
+#           "type": "number",
+#           "description": "score's percent of maximum points possible for outcome, scaled to reflect any custom mastery levels that differ from the learning outcome"
 #         }
 #       }
 #     }
@@ -77,7 +83,7 @@
 #           "description": "The number of alignment scores included in this rollup."
 #         },
 #         "links": {
-#           "example": "{\"outcome\"=>\"42\"}",
+#           "example": {"outcome": "42"},
 #           "$ref": "OutcomeRollupScoreLinks"
 #         }
 #       }
@@ -89,7 +95,7 @@
 #       "description": "",
 #       "properties": {
 #         "course": {
-#           "description": "If an aggregate result was requested, the course field will be present Otherwise, the user and section field will be present (Optional) The id of the course that this rollup applies to",
+#           "description": "If an aggregate result was requested, the course field will be present. Otherwise, the user and section field will be present (Optional) The id of the course that this rollup applies to",
 #           "example": 42,
 #           "type": "integer"
 #         },
@@ -121,7 +127,7 @@
 #           "type": "string"
 #         },
 #         "links": {
-#           "example": "{\"course\"=>42, \"user\"=>42, \"section\"=>57}",
+#           "example": {"course": 42, "user": 42, "section": 57},
 #           "$ref": "OutcomeRollupLinks"
 #         }
 #       }
@@ -417,19 +423,24 @@ class OutcomeResultsController < ApplicationController
       @outcome_links = ContentTag.learning_outcome_links.active.where(associated_asset_id: group_id).preload(:learning_outcome_content)
       @outcomes = @outcome_links.map(&:learning_outcome_content)
     else
-      @outcome_links = []
-      outcome_group_ids.each_slice(100) do |outcome_group_ids_slice|
-        @outcome_links += ContentTag.learning_outcome_links.active.where(associated_asset_id: outcome_group_ids_slice)
-      end
-      @outcome_links.each_slice(100) do |outcome_links_slice|
-        ActiveRecord::Associations::Preloader.new(outcome_links_slice, :learning_outcome_content).run
-      end
-
       if params[:outcome_ids]
         outcome_ids = Api.value_to_array(params[:outcome_ids]).map(&:to_i).uniq
-        @outcomes = @outcome_links.map(&:learning_outcome_content).select{ |outcome| outcome_ids.include?(outcome.id) }
+        # outcomes themselves are not duped when moved into a new group, so we
+        # need to instead look at the uniqueness of the associating content tag's
+        # context and outcome id in order to ensure we get the correct result
+        # from the query without rendering the reject! check moot
+        @outcomes = ContentTag.learning_outcome_links.active.joins(:learning_outcome_content)
+          .where(content_id: outcome_ids, context_type: @context.class_name, context_id: @context.id)
+          .to_a.uniq{|tag| [tag.context, tag.content_id]}.map(&:learning_outcome_content)
         reject! "can only include id's of outcomes in the outcome context" if @outcomes.count != outcome_ids.count
       else
+        @outcome_links = []
+        outcome_group_ids.each_slice(100) do |outcome_group_ids_slice|
+          @outcome_links += ContentTag.learning_outcome_links.active.where(associated_asset_id: outcome_group_ids_slice)
+        end
+        @outcome_links.each_slice(100) do |outcome_links_slice|
+          ActiveRecord::Associations::Preloader.new.preload(outcome_links_slice, :learning_outcome_content)
+        end
         @outcomes = @outcome_links.map(&:learning_outcome_content)
       end
     end
@@ -453,14 +464,14 @@ class OutcomeResultsController < ApplicationController
     reject! "cannot specify both user_ids and section_id" if params[:user_ids] && params[:section_id]
     if params[:user_ids]
       user_ids = Api.value_to_array(params[:user_ids]).uniq
-      @users = api_find_all(users_for_outcome_context, user_ids).uniq
+      @users = api_find_all(users_for_outcome_context, user_ids).uniq.to_a
       reject!( "can only include id's of users in the outcome context") if @users.count != user_ids.count
     elsif params[:section_id]
       @section = @context.course_sections.where(id: params[:section_id].to_i).first
       reject! "invalid section id" unless @section
-      @users = @section.students
+      @users = @section.students.to_a
     end
-    @users ||= users_for_outcome_context
+    @users ||= users_for_outcome_context.to_a
     @users.sort! {|a,b| a.id <=> b.id}
   end
 

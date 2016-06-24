@@ -3,8 +3,9 @@ require File.expand_path(File.dirname(__FILE__) + '/../helpers/calendar2_common'
 
 describe "calendar2" do
   include_context "in-process server selenium tests"
+  include Calendar2Common
 
-  before (:each) do
+  before(:each) do
     Account.default.tap do |a|
       a.settings[:show_scheduler]   = true
       a.save!
@@ -12,7 +13,7 @@ describe "calendar2" do
   end
 
   context "as a teacher" do
-    before (:each) do
+    before(:each) do
       course_with_teacher_logged_in
     end
 
@@ -79,7 +80,7 @@ describe "calendar2" do
       replace_content(f('.ui-dialog #assignment_title'), "Assignment 2!")
       submit_form('#edit_assignment_form')
       wait_for_ajaximations
-      expect(assignment2.reload.title).to eq "Assignment 2!"
+      expect(assignment2.reload.title).to include_text("Assignment 2!")
       expect(assignment2.assignment_group).to eq group2
     end
 
@@ -97,7 +98,7 @@ describe "calendar2" do
       wait_for_ajaximations
       assignment.reload
       wait_for_ajaximations
-      expect(assignment.title).to eql("edited title")
+      expect(assignment.title).to include_text("edited title")
 
       fj('.fc-event').click
       wait_for_ajaximations
@@ -107,9 +108,10 @@ describe "calendar2" do
     end
 
     it "should make an assignment undated if you delete the start date" do
+      skip_if_chrome('can not replace content')
       create_middle_day_assignment("undate me")
       keep_trying_until do
-        fj('.fc-event-inner').click()
+        fj('.fc-event').click
         driver.execute_script("$('.popover-links-holder .edit_event_link').hover().click()")
         f('.ui-dialog #assignment_due_at').displayed?
       end
@@ -202,13 +204,12 @@ describe "calendar2" do
       current_month = Date::MONTHNAMES[current_month_num]
 
       change_calendar
-      expect(get_header_text).not_to eq current_month
+      expect(header_text).not_to eq current_month
       change_calendar(:today)
-      expect(get_header_text).to eq(current_month + ' ' + Time.now.year.to_s)
+      expect(header_text).to eq(current_month + ' ' + Time.zone.now.year.to_s)
     end
 
     it "should allow viewing an unenrolled calendar via include_contexts" do
-      skip('failed')
       # also make sure the redirect from calendar -> calendar2 keeps the param
       unrelated_course = Course.create!(:account => Account.default, :name => "unrelated course")
       # make the user an admin so they can view the course's calendar without an enrollment
@@ -227,14 +228,17 @@ describe "calendar2" do
       end
     end
 
-    it "tooltip is correct for creating new event", priority: "1", test_id: 138852 do
-     load_month_view
-
-      driver.mouse.move_to f("#create_new_event_link")
-      wait_for_animations
-      tooltip = fj('.ui-tooltip:visible')
-      tooltip = fj('.ui-tooltip:visible')
-      expect(tooltip).to include_text 'Create New Event'
+    it "should only consider active enrollments for upcoming events list", priority: "2", test_id: 854796 do
+      make_event(title: "Test Event", start: Time.zone.now + 1.day, context: @course)
+      get "/"
+      expect(f('.coming_up').text).to include('Test Event')
+      term = EnrollmentTerm.find(@course.enrollment_term_id)
+      term.end_at = Time.zone.now.advance(days: -5)
+      term.save!
+      keep_trying_until do
+       refresh_page
+       expect(f('.coming_up').text).to include('Nothing for the next week')
+      end
     end
 
     it "graded discussion appears on all calendars", priority: "1", test_id: 138851 do

@@ -24,12 +24,15 @@ module SIS
     def process(messages, updates_every)
       start = Time.now
       i = Work.new(@batch, @root_account, @logger, updates_every, messages)
-      Enrollment.suspend_callbacks(:belongs_to_touch_after_save_or_destroy_for_course, :update_cached_due_dates) do
-        User.skip_updating_account_associations do
-          Enrollment.process_as_sis(@sis_options) do
-            yield i
-            while i.any_left_to_process?
-              i.process_batch
+
+      Enrollment.skip_touch_callbacks(:course) do
+        Enrollment.suspend_callbacks(:update_cached_due_dates) do
+          User.skip_updating_account_associations do
+            Enrollment.process_as_sis(@sis_options) do
+              yield i
+              while i.any_left_to_process?
+                i.process_batch
+              end
             end
           end
         end
@@ -41,7 +44,7 @@ module SIS
       # We batch these up at the end because we don't want to keep touching the same course over and over,
       # and to avoid hitting other callbacks for the course (especially broadcast_policy)
       i.courses_to_touch_ids.to_a.in_groups_of(1000, false) do |batch|
-        Course.where(:id => batch).update_all(:updated_at => Time.now.utc)
+        Course.where(id: batch).touch_all
       end
       i.courses_to_recache_due_dates.to_a.in_groups_of(1000, false) do |batch|
         batch.each do |course_id|
@@ -53,7 +56,7 @@ module SIS
       i.incrementally_update_account_associations
       User.update_account_associations(i.update_account_association_user_ids.to_a, :account_chain_cache => i.account_chain_cache)
       i.users_to_touch_ids.to_a.in_groups_of(1000, false) do |batch|
-        User.where(:id => batch).update_all(:updated_at => Time.now.utc)
+        User.where(id: batch).touch_all
       end
       @logger.debug("Enrollments with batch operations took #{Time.now - start} seconds")
       return i.success_count
@@ -158,7 +161,9 @@ module SIS
             end
 
             unless pseudo
-              @messages << "User #{user_id} didn't exist for user enrollment"
+              err = "User not found for enrollment "
+              err << "(User ID: #{user_id}, Course ID: #{course_id}, Section ID: #{section_id})"
+              @messages << err
               next
             end
 
@@ -172,8 +177,10 @@ module SIS
 
             @course ||= @root_account.all_courses.where(sis_source_id: course_id).first unless course_id.blank?
             @section ||= @root_account.course_sections.where(sis_source_id: section_id).first unless section_id.blank?
-            unless (@course || @section)
-              @messages << "Neither course #{course_id} nor section #{section_id} existed for user enrollment"
+            if @course.nil? && @section.nil?
+              message = "Neither course nor section existed for user enrollment "
+              message << "(Course ID: #{course_id}, Section ID: #{section_id}, User ID: #{user_id})"
+              @messages << message
               next
             end
 
@@ -192,7 +199,10 @@ module SIS
             @course = @section.course if @course.nil? || (course_id.blank? && @course.id != @section.course_id) || (@course.id != @section.course_id && @section.nonxlist_course_id == @course.id)
 
             if @course.id != @section.course_id
-              @messages << "An enrollment listed a section and a course that are unrelated"
+              message = "An enrollment listed a section (#{section_id}) "
+              message << "and a course (#{course_id}) that are unrelated "
+              message << "for user (#{user_id})"
+              @messages << message
               next
             end
 
@@ -272,6 +282,7 @@ module SIS
               enrollment.workflow_state = 'deleted'
             elsif status =~ /\Acompleted/i
               enrollment.workflow_state = 'completed'
+              enrollment.completed_at ||= Time.now
             elsif status =~ /\Ainactive/i
               enrollment.workflow_state = 'inactive'
             end

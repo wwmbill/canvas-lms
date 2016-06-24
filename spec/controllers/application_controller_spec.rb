@@ -52,86 +52,11 @@ describe ApplicationController do
     end
   end
 
-  describe "#google_docs_connection" do
-    it "uses @real_current_user first" do
-      mock_real_current_user = mock()
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, mock_real_current_user)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-      session[:oauth_gdocs_access_token_token] = "session_token"
-      session[:oauth_gdocs_access_token_secret] = "sesion_secret"
-
-      Rails.cache.expects(:fetch).with(['google_docs_tokens', mock_real_current_user].cache_key).returns(["real_current_user_token", "real_current_user_secret"])
-
-      GoogleDocs::Connection.expects(:new).with("real_current_user_token", "real_current_user_secret")
-
-      controller.send(:google_docs_connection)
-    end
-
-    it "uses @current_user second" do
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-      session[:oauth_gdocs_access_token_token] = "session_token"
-      session[:oauth_gdocs_access_token_secret] = "sesion_secret"
-
-      Rails.cache.expects(:fetch).with(['google_docs_tokens', mock_current_user].cache_key).returns(["current_user_token", "current_user_secret"])
-
-      GoogleDocs::Connection.expects(:new).with("current_user_token", "current_user_secret")
-
-      controller.send(:google_docs_connection)
-    end
-
-    it "queries user services if token isn't in the cache" do
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-      session[:oauth_gdocs_access_token_token] = "session_token"
-      session[:oauth_gdocs_access_token_secret] = "sesion_secret"
-
-      mock_user_services = mock("mock_user_services")
-      mock_current_user.expects(:user_services).returns(mock_user_services)
-      mock_user_services.expects(:where).with(service: "google_docs").returns(stub(first: mock(token: "user_service_token", secret: "user_service_secret")))
-
-      GoogleDocs::Connection.expects(:new).with("user_service_token", "user_service_secret")
-
-      controller.send(:google_docs_connection)
-    end
-
-    it "uses the session values if no users are set" do
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, nil)
-      session[:oauth_gdocs_access_token_token] = "session_token"
-      session[:oauth_gdocs_access_token_secret] = "sesion_secret"
-
-      GoogleDocs::Connection.expects(:new).with("session_token", "sesion_secret")
-
-      controller.send(:google_docs_connection)
-    end
-
-    it "raises a NoTokenError when the user exists but does not have a user service" do
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-      session[:oauth_gdocs_access_token_token] = "session_token"
-      session[:oauth_gdocs_access_token_secret] = "sesion_secret"
-
-      mock_user_services = mock("mock_user_services")
-      mock_current_user.expects(:user_services).returns(mock_user_services)
-      mock_user_services.expects(:where).with(service: "google_docs").returns(stub(first: nil))
-
-      expect {
-        controller.send(:google_docs_connection)
-      }.to raise_error(GoogleDocs::NoTokenError)
-    end
-  end
-
   describe "#google_drive_connection" do
     before :each do
       settings_mock = mock()
       settings_mock.stubs(:settings).returns({})
       Canvas::Plugin.stubs(:find).returns(settings_mock)
-
     end
 
     it "uses @real_current_user first" do
@@ -144,7 +69,7 @@ describe ApplicationController do
 
       Rails.cache.expects(:fetch).with(['google_drive_tokens', mock_real_current_user].cache_key).returns(["real_current_user_token", "real_current_user_secret"])
 
-      GoogleDocs::DriveConnection.expects(:new).with("real_current_user_token", "real_current_user_secret", 30)
+      GoogleDrive::Connection.expects(:new).with("real_current_user_token", "real_current_user_secret", 30)
 
       controller.send(:google_drive_connection)
     end
@@ -158,7 +83,7 @@ describe ApplicationController do
 
       Rails.cache.expects(:fetch).with(['google_drive_tokens', mock_current_user].cache_key).returns(["current_user_token", "current_user_secret"])
 
-      GoogleDocs::DriveConnection.expects(:new).with("current_user_token", "current_user_secret", 30)
+      GoogleDrive::Connection.expects(:new).with("current_user_token", "current_user_secret", 30)
       controller.send(:google_drive_connection)
     end
 
@@ -173,7 +98,7 @@ describe ApplicationController do
       mock_current_user.expects(:user_services).returns(mock_user_services)
       mock_user_services.expects(:where).with(service: "google_drive").returns(stub(first: mock(token: "user_service_token", secret: "user_service_secret")))
 
-      GoogleDocs::DriveConnection.expects(:new).with("user_service_token", "user_service_secret", 30)
+      GoogleDrive::Connection.expects(:new).with("user_service_token", "user_service_secret", 30)
       controller.send(:google_drive_connection)
     end
 
@@ -183,72 +108,9 @@ describe ApplicationController do
       session[:oauth_gdrive_refresh_token] = "session_token"
       session[:oauth_gdrive_access_token] = "sesion_secret"
 
-      GoogleDocs::DriveConnection.expects(:new).with("session_token", "sesion_secret", 30)
+      GoogleDrive::Connection.expects(:new).with("session_token", "sesion_secret", 30)
 
       controller.send(:google_drive_connection)
-    end
-  end
-
-  describe "#google_drive_user_client" do
-    before :each do
-      settings_mock = mock()
-      settings_mock.stubs(:settings).returns({})
-      Canvas::Plugin.stubs(:find).returns(settings_mock)
-
-    end
-
-    let(:empty_client_secrets) do
-      {
-        client_id: nil,
-        client_secret: nil,
-        redirect_uri: nil
-      }.with_indifferent_access
-    end
-
-    it "uses @real_current_user first" do
-      mock_real_current_user = mock()
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, mock_real_current_user)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-
-      Rails.cache.expects(:fetch).with(['google_drive_tokens', mock_real_current_user].cache_key).returns(["real_current_user_refresh_token", "real_current_user_access_token"])
-      GoogleDrive::Client.expects(:create).with(empty_client_secrets,"real_current_user_refresh_token", "real_current_user_access_token")
-      controller.send(:google_drive_user_client)
-    end
-
-    it "uses @current_user second" do
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-      Rails.cache.expects(:fetch).with(['google_drive_tokens', mock_current_user].cache_key).returns(["current_user_refresh_token", "current_user_access_token"])
-      GoogleDrive::Client.expects(:create).with(empty_client_secrets,"current_user_refresh_token", "current_user_access_token")
-      controller.send(:google_drive_user_client)
-    end
-
-    it "queries user services if token isn't in the cache" do
-      mock_current_user = mock()
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, mock_current_user)
-
-      mock_user_services = mock("mock_user_services")
-      mock_current_user.expects(:user_services).returns(mock_user_services)
-      service_mock = mock('service')
-      service_mock.stubs(first: mock(token: "user_refresh_token", access_token: "user_access_token"))
-      mock_user_services.expects(:where).with(service: "google_drive").returns(service_mock)
-
-      GoogleDrive::Client.expects(:create).with(empty_client_secrets, "user_refresh_token", "user_access_token")
-
-      controller.send(:google_drive_user_client)
-    end
-
-    it "uses the session values if no users are set" do
-      controller.instance_variable_set(:@real_current_user, nil)
-      controller.instance_variable_set(:@current_user, nil)
-      session[:oauth_gdrive_access_token] = "access_token"
-      session[:oauth_gdrive_refresh_token] = "refresh_token"
-
-      GoogleDrive::Client.expects(:create).with(empty_client_secrets, "refresh_token", "access_token")
-      controller.send(:google_drive_user_client)
     end
   end
 
@@ -267,7 +129,10 @@ describe ApplicationController do
     it "should auto-set timezone and locale" do
       I18n.locale = :fr
       Time.zone = 'Alaska'
-      expect(@controller.js_env[:LOCALE]).to eq 'fr-FR'
+      expect(@controller.js_env[:LOCALE]).to eq 'fr'
+      expect(@controller.js_env[:BIGEASY_LOCALE]).to eq 'fr_FR'
+      expect(@controller.js_env[:FULLCALENDAR_LOCALE]).to eq 'fr'
+      expect(@controller.js_env[:MOMENT_LOCALE]).to eq 'fr'
       expect(@controller.js_env[:TIMEZONE]).to eq 'America/Juneau'
     end
 
@@ -506,6 +371,7 @@ describe ApplicationController do
         req = mock()
         req.stubs(:url).returns('url')
         req.stubs(:headers).returns({})
+        req.stubs(:authorization).returns(nil)
         req.stubs(:request_method_symbol).returns(:get)
         req.stubs(:format).returns('format')
 
@@ -563,6 +429,17 @@ describe ApplicationController do
         controller.instance_variable_set(:"@context", course)
         controller.send(:content_tag_redirect, course, content_tag, nil)
       end
+
+      it 'sets the resource_link_id correctly' do
+        controller.stubs(:named_context_url).returns('wrong_url')
+        controller.stubs(:render)
+        controller.stubs(js_env:[])
+        controller.instance_variable_set(:"@context", course)
+        content_tag.stubs(:id).returns(42)
+        controller.send(:content_tag_redirect, course, content_tag, nil)
+        expect(assigns[:lti_launch].params["resource_link_id"]).to eq 'e62d81a8a1587cdf9d3bbc3de0ef303d6bc70d78'
+      end
+
     end
 
   end
@@ -575,23 +452,128 @@ describe ApplicationController do
       tool.account_navigation = {:url => "http://example.com", :icon_url => "http://example.com", :enabled => true}
       tool.save!
 
-      controller.stubs(:named_context_url).returns("http://example.com")
+      controller.stubs(:polymorphic_url).returns("http://example.com")
       external_tools = controller.external_tools_display_hashes(:account_navigation, @group)
 
       expect(external_tools).to eq([])
     end
+
+    it 'returns array of tools if context is not group' do
+      @course = course_model
+      tool = @course.context_external_tools.new(:name => "bob", :consumer_key => "test", :shared_secret => "secret", :url => "http://example.com")
+      tool.account_navigation = {:url => "http://example.com", :icon_url => "http://example.com", :enabled => true, :canvas_icon_class => 'icon-commons'}
+      tool.save!
+
+      controller.stubs(:polymorphic_url).returns("http://example.com")
+      external_tools = controller.external_tools_display_hashes(:account_navigation, @course)
+
+      expect(external_tools).to eq([{:title=>"bob", :base_url=>"http://example.com", :icon_url=>"http://example.com", :canvas_icon_class => 'icon-commons'}])
+    end
   end
 
-  it 'returns array of tools if context is not group' do
-    @course = course_model
-    tool = @course.context_external_tools.new(:name => "bob", :consumer_key => "test", :shared_secret => "secret", :url => "http://example.com")
-    tool.account_navigation = {:url => "http://example.com", :icon_url => "http://example.com", :enabled => true}
-    tool.save!
+  describe 'external_tool_display_hash' do
+    def tool_settings(setting, include_class=false)
+      settings_hash = {
+        url: "http://example.com/?#{setting.to_s}",
+        icon_url: "http://example.com/icon.png?#{setting.to_s}",
+        enabled: true
+      }
 
-    controller.stubs(:named_context_url).returns("http://example.com")
-    external_tools = controller.external_tools_display_hashes(:account_navigation, @course)
+      settings_hash[:canvas_icon_class] = "icon-#{setting.to_s}" if include_class
+      settings_hash
+    end
 
-    expect(external_tools).to eq([{:title=>"bob", :base_url=>"http://example.com", :icon_url=>"http://example.com"}])
+    before :once do
+      @course = course_model
+      @group = @course.groups.create!(:name => "some group")
+      @tool = @course.context_external_tools.new(:name => "bob", :consumer_key => "test", :shared_secret => "secret", :url => "http://example.com")
+
+      @tool_settings = [
+        :user_navigation, :course_navigation, :account_navigation, :resource_selection,
+        :editor_button, :homework_submission, :migration_selection, :course_home_sub_navigation,
+        :course_settings_sub_navigation, :global_navigation,
+        :assignment_menu, :file_menu, :discussion_topic_menu, :module_menu, :quiz_menu, :wiki_page_menu,
+        :tool_configuration, :link_selection, :assignment_selection, :post_grades
+      ]
+
+      @tool_settings.each do |setting|
+        @tool.send("#{setting}=", tool_settings(setting))
+      end
+      @tool.save!
+    end
+
+    before :each do
+      controller.stubs(:request).returns(ActionDispatch::TestRequest.new)
+      controller.instance_variable_set(:@context, @course)
+    end
+
+    it 'returns a hash' do
+      hash = controller.external_tool_display_hash(@tool, :account_navigation)
+      left_over_keys = hash.keys - [:base_url, :title, :icon_url, :canvas_icon_class]
+      expect(left_over_keys).to eq []
+    end
+
+    it 'returns a hash' do
+      hash = controller.external_tool_display_hash(@tool, :account_navigation)
+      left_over_keys = hash.keys - [:base_url, :title, :icon_url, :canvas_icon_class]
+      expect(left_over_keys).to eq []
+    end
+
+    it 'all settings are correct' do
+      @tool_settings.each do |setting|
+        hash = controller.external_tool_display_hash(@tool, setting)
+        expect(hash[:base_url]).to eq "http://test.host/courses/#{@course.id}/external_tools/#{@tool.id}?launch_type=#{setting.to_s}"
+        expect(hash[:icon_url]).to eq "http://example.com/icon.png?#{setting.to_s}"
+        expect(hash[:canvas_icon_class]).to be nil
+      end
+    end
+
+    it 'all settings return canvas_icon_class if set' do
+      @tool_settings.each do |setting|
+        @tool.send("#{setting}=", tool_settings(setting, true))
+        @tool.save!
+
+        hash = controller.external_tool_display_hash(@tool, setting)
+        expect(hash[:base_url]).to eq "http://test.host/courses/#{@course.id}/external_tools/#{@tool.id}?launch_type=#{setting.to_s}"
+        expect(hash[:icon_url]).to eq "http://example.com/icon.png?#{setting.to_s}"
+        expect(hash[:canvas_icon_class]).to eq "icon-#{setting.to_s}"
+      end
+    end
+  end
+
+  describe 'verify_authenticity_token' do
+    before :each do
+      # default setup is a protected non-GET non-API session-authenticated request with bogus tokens
+      cookies = ActionDispatch::Cookies::CookieJar.new(nil)
+      controller.allow_forgery_protection = true
+      controller.request.stubs(:cookie_jar).returns(cookies)
+      controller.request.stubs(:get?).returns(false)
+      controller.request.stubs(:head?).returns(false)
+      controller.request.stubs(:path).returns('/non-api/endpoint')
+      controller.instance_variable_set(:@pseudonym_session, "session-authenticated")
+      controller.params[controller.request_forgery_protection_token] = "bogus"
+      controller.request.headers['X-CSRF-Token'] = "bogus"
+    end
+
+    it "should raise InvalidAuthenticityToken with invalid tokens" do
+      expect{ controller.send(:verify_authenticity_token) }.to raise_exception(ActionController::InvalidAuthenticityToken)
+    end
+
+    it "should not raise with valid token" do
+      controller.request.headers['X-CSRF-Token'] = controller.form_authenticity_token
+      expect{ controller.send(:verify_authenticity_token) }.not_to raise_exception
+    end
+
+    it "should still raise on session-authenticated api request with invalid tokens" do
+      controller.request.stubs(:path).returns('/api/endpoint')
+      expect{ controller.send(:verify_authenticity_token) }.to raise_exception(ActionController::InvalidAuthenticityToken)
+    end
+
+    it "should not raise on token-authenticated api request despite invalid tokens" do
+      controller.request.stubs(:path).returns('/api/endpoint')
+      controller.instance_variable_set(:@pseudonym_session, nil)
+      expect{ controller.send(:verify_authenticity_token) }.not_to raise_exception
+    end
   end
 end
 
@@ -614,6 +596,38 @@ describe ApplicationController do
       expect(controller.send(:flash_notices)).to match_array([
         {type: 'success', content: {html: '<p>hello</p>'}, icon: 'check'}
       ])
+    end
+  end
+
+  describe "#ms_office?" do
+    it "detects Word 2011 for mac" do
+      controller.request.user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X) Word/14.57.0'
+      expect(controller.send(:ms_office?)).to eq true
+    end
+  end
+
+  describe "#get_all_pertinent_contexts" do
+    it "doesn't touch the database if there are no valid courses" do
+      user
+      controller.instance_variable_set(:@context, @user)
+
+      course_scope = stub('current_enrollments')
+      course_scope.stubs(:current).returns(course_scope)
+      course_scope.stubs(:shard).returns(course_scope)
+      course_scope.stubs(:preload).returns(course_scope)
+      course_scope.expects(:none).returns(Enrollment.none)
+      @user.stubs(:enrollments).returns(course_scope)
+      controller.send(:get_all_pertinent_contexts, only_contexts: 'Group_1')
+    end
+
+    it "doesn't touch the database if there are no valid groups" do
+      user
+      controller.instance_variable_set(:@context, @user)
+
+      group_scope = stub('current_groups')
+      group_scope.expects(:none).returns(Group.none)
+      @user.stubs(:current_groups).returns(group_scope)
+      controller.send(:get_all_pertinent_contexts, include_groups: true, only_contexts: 'Course_1')
     end
   end
 end

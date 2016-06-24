@@ -33,6 +33,26 @@ describe AssignmentOverrideApplicator do
     @membership = @group.add_user(@student)
   end
 
+  def create_group_override_for_discussion
+    @category = group_category(name: "bar")
+    @group = @category.groups.create!(context: @course)
+
+    @assignment = create_assignment(:course => @course)
+    @assignment.submission_types = 'discussion_topic'
+    @assignment.saved_by = :discussion_topic
+    @discussion_topic = @course.discussion_topics.create(:message => "some message")
+    @discussion_topic.group_category_id = @category.id
+    @discussion_topic.assignment = @assignment
+    @discussion_topic.save!
+    @assignment.reload
+
+    @override = assignment_override_model(:assignment => @assignment)
+    @override.set = @group
+    @override.save!
+
+    @membership = @group.add_user(@student)
+  end
+
   def create_assignment(*args)
     # need to make sure it doesn't invalidate the cache right away
     Timecop.freeze(5.seconds.ago) do
@@ -298,6 +318,12 @@ describe AssignmentOverrideApplicator do
           expect(result).to eq @override
         end
 
+        it 'returns groups overrides for graded discussions' do
+          create_group_override_for_discussion
+          result = AssignmentOverrideApplicator.group_override(@assignment, @student)
+          expect(result).to eq @override
+        end
+
         it "should not include group override for groups other than the user's" do
           @override.set = @category.groups.create!(context: @course)
           @override.save!
@@ -393,6 +419,12 @@ describe AssignmentOverrideApplicator do
 
         it "should not include section overrides for sections with deleted enrollments" do
           @student2.student_enrollments.first.destroy
+          overrides = AssignmentOverrideApplicator.overrides_for_assignment_and_user(@assignment, @student2)
+          expect(overrides).to be_empty
+        end
+
+        it "should not include section overrides for sections with concluded enrollments" do
+          @student2.student_enrollments.first.conclude
           overrides = AssignmentOverrideApplicator.overrides_for_assignment_and_user(@assignment, @student2)
           expect(overrides).to be_empty
         end
@@ -750,7 +782,9 @@ describe AssignmentOverrideApplicator do
       enable_cache do
         overrides1 = AssignmentOverrideApplicator.collapsed_overrides(@assignment, [@override])
         Rails.cache.expects(:write_entry).never
-        overrides2 = AssignmentOverrideApplicator.collapsed_overrides(@assignment, [@override])
+        Timecop.freeze(5.seconds.from_now) do
+          overrides2 = AssignmentOverrideApplicator.collapsed_overrides(@assignment, [@override])
+        end
       end
     end
 
@@ -1116,5 +1150,29 @@ describe AssignmentOverrideApplicator do
 
     @overridden_assignment = AssignmentOverrideApplicator.assignment_overridden_for(@assignment, @student)
     expect(@overridden_assignment.due_at).to eq @section_override.due_at
+  end
+
+  it "should not cache incorrect overrides through due_between_with_overrides" do
+    course_with_student(:active_all => true)
+    @assignment = create_assignment(:course => @course, :submission_types => "online_upload")
+
+    so = assignment_override_model(:assignment => @assignment)
+    so.set = @course.default_section
+    so.override_due_at(30.days.from_now) # set it outside of the default upcoming events range
+    so.save!
+
+    other_so = assignment_override_model(:assignment => @assignment)
+    other_so.set = @course.course_sections.create!
+    other_so.override_due_at(5.days.from_now) # set it so it would be included in the upcoming events query
+    other_so.save!
+
+    Timecop.freeze(5.seconds.from_now) do
+      enable_cache do
+        @student.upcoming_events # prime the cache
+
+        @assignment.reload
+        expect(@assignment.overridden_for(@student).due_at).to eq so.due_at # should have cached correctly
+      end
+    end
   end
 end

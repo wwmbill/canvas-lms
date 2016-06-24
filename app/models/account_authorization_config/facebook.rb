@@ -29,10 +29,6 @@ class AccountAuthorizationConfig::Facebook < AccountAuthorizationConfig::Oauth2
   alias_method :app_secret=, :client_secret=
   alias_method :app_secret, :client_secret
 
-  def login_button?
-    true
-  end
-  
   def client_id
     self.class.globally_configured? ? app_id : super
   end
@@ -42,7 +38,7 @@ class AccountAuthorizationConfig::Facebook < AccountAuthorizationConfig::Oauth2
   end
 
   def self.recognized_params
-    [ :login_attribute ].freeze
+    [ :login_attribute, :jit_provisioning ].freeze
   end
 
   def self.login_attributes

@@ -39,6 +39,8 @@ event originated as part of a web request:
 | `real_user_id` | Number | If the current user is being masqueraded, this is the Canvas id of the masquerading user. |
 | `user_login` | String | The login of the current user. |
 | `user_agent` | String | The User-Agent sent by the browser making the request. |
+| `root_account_id` | Number | The Canvas id of the root account associated with the current user. |
+| `root_account_lti_guid` | String | The Canvas lti_guid of the root account associated with the current user. |
 | `context_type` | String | The type of context where the event happened. |
 | `context_id` | Number | The Canvas id of the current context. Always use the `context_type` when using this id to lookup the object. |
 | `role` | String | The role of the current user in the current context.  |
@@ -165,10 +167,11 @@ should be null in the body.
 | Field | Description |
 | ----- | ----------- |
 | `submission_id` | The Canvas id of the submission that the grade is changing on. |
+| `assignment_id` | The Canvas id of the assignment associated with the submission. |
 | `grade` | The new grade. |
 | `old_grade` | The previous grade, if there was one. |
 | `grader_id` | The Canvas id of the user making the grade change. Null if this was the result of automatic grading. |
-| `student_id` | The Canvas id of the student associated with the submission with the change. |
+| `user_id` | The Canvas id of the user associated with the submission with the change. |
 
 
 #### `wiki_page_created`
@@ -218,3 +221,64 @@ by `asset_type` and `asset_id`.
 | `asset_type` | The type of asset being accessed. |
 | `asset_id` | The Canvas id of the asset. |
 | `asset_subtype` | See above. |
+
+
+#### `assignment_created`
+
+| Field | Description |
+| ----- | ----------- |
+| `assignment_id` | The Canvas id of the new assignment. |
+| `title` | The title of the assignment (possibly truncated). |
+| `description` | The description of the assignment (possibly truncated). |
+| `due_at` | The due date for the assignment. |
+| `unlock_at` | The unlock date (assignment is unlocked after this date) |
+| `lock_at` | The lock date (assignment is locked after this date) |
+| `updated_at` | The time at which this assignment was last modified in any way |
+| `points_possible` | The maximum points possible for the assignment |
+
+
+#### `assignment_updated`
+
+| Field | Description |
+| ----- | ----------- |
+| `assignment_id` | The Canvas id of the new assignment. |
+| `title` | The title of the assignment (possibly truncated). |
+| `description` | The description of the assignment (possibly truncated). |
+| `due_at` | The due date for the assignment. |
+| `unlock_at` | The unlock date (assignment is unlocked after this date) |
+| `lock_at` | The lock date (assignment is locked after this date) |
+| `updated_at` | The time at which this assignment was last modified in any way |
+| `points_possible` | The maximum points possible for the assignment |
+
+
+#### `submission_created`
+
+| Field | Description |
+| ----- | ----------- |
+| `submission_id` | The Canvas id of the new submission. |
+| `assignment_id` | The Canvas id of the assignment being submitted. |
+| `user_id` | The Canvas id of the user associated with the submission. |
+| `submitted_at` | The timestamp when the assignment was submitted. |
+| `updated_at` | The time at which this assignment was last modified in any way |
+| `score` | The raw score |
+| `grade` | The grade for the submission, translated into the assignment grading scheme (so a letter grade, for example)|
+| `submission_type` | The types of submission ex: ('online_text_entry'|'online_url'|'online_upload'|'media_recording') |
+| `body` | The content of the submission, if it was submitted directly in a text field.  (possibly truncated)|
+| `url` | The URL of the submission (for 'online_url' submissions) |
+| `attempt` | This is the submission attempt number.|
+
+#### `submission_updated`
+
+| Field | Description |
+| ----- | ----------- |
+| `submission_id` | The Canvas id of the new submission. |
+| `assignment_id` | The Canvas id of the assignment being submitted. |
+| `user_id` | The Canvas id of the user associated with the submission. |
+| `submitted_at` | The timestamp when the assignment was submitted. |
+| `updated_at` | The time at which this assignment was last modified in any way |
+| `score` | The raw score |
+| `grade` | The grade for the submission, translated into the assignment grading scheme (so a letter grade, for example)|
+| `submission_type` | The types of submission ex: ('online_text_entry'|'online_url'|'online_upload'|'media_recording') |
+| `body` | The content of the submission, if it was submitted directly in a text field. (possibly truncated) |
+| `url` | The URL of the submission (for 'online_url' submissions) |
+| `attempt` | This is the submission attempt number.|

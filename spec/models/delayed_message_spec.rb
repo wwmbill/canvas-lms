@@ -124,6 +124,22 @@ describe DelayedMessage do
     expect(DelayedMessage.summarize([dm])).to be_nil
   end
 
+  it "uses the root account's locale if the user locale isn't set" do
+    Canvas::MessageHelper.create_notification(:name => 'Summaries', :category => 'Summaries')
+    account = Account.create!(default_locale: 'es')
+    delayed_message_model(root_account_id: account.id).save!
+    I18n.expects(:with_locale).with('es').once
+    DelayedMessage.summarize([@delayed_message])
+  end
+
+  it "uses the user's locale for the summary message" do
+    Canvas::MessageHelper.create_notification(:name => 'Summaries', :category => 'Summaries')
+    @user = User.create!(locale: 'es')
+    delayed_message_model.save!
+    I18n.expects(:with_locale).with('es').once
+    DelayedMessage.summarize([@delayed_message])
+  end
+
   context "sharding" do
     specs_require_sharding
 
@@ -313,20 +329,6 @@ describe DelayedMessage do
         expect(actual_diffs.sort).to eq expected_diffs
         expect(windows.uniq.size).to eq 1
       end
-    end
-  end
-
-  describe '.context_type' do
-    it 'returns the correct representation of a quiz submission' do
-      message = delayed_message_model
-      submission = quiz_model.quiz_submissions.create!
-      message.context = submission
-      message.save
-      expect(message.context_type).to eq 'Quizzes::QuizSubmission'
-
-      DelayedMessage.where(id: message).update_all(context_type: 'QuizSubmission')
-
-      expect(DelayedMessage.find(message.id).context_type).to eq 'Quizzes::QuizSubmission'
     end
   end
 end

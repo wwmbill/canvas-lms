@@ -20,19 +20,11 @@
 # asset_group_code is for the group
 # so, for example, the asset could be an assignment, the group would be the assignment_group
 class AssetUserAccess < ActiveRecord::Base
-  belongs_to :context, :polymorphic => true
-  validates_inclusion_of :context_type, :allow_nil => true, :in => ['User', 'Group', 'Course']
+  belongs_to :context, polymorphic: [:account, :course, :group, :user], polymorphic_prefix: true
   belongs_to :user
   has_many :page_views
   before_save :infer_defaults
   attr_accessible :user, :asset_code
-
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :asset_code, :asset_group_code, :user_id, :context_id, :context_type, :count, :last_access, :created_at, :updated_at, :asset_category, :view_score,
-    :participate_score, :action_level, :summarized_at, :interaction_seconds, :display_name, :membership_type
-  ]
-
-  EXPORTABLE_ASSOCIATIONS = [:context, :user, :page_views]
 
   scope :for_context, lambda { |context| where(:context_id => context, :context_type => context.class.to_s) }
   scope :for_user, lambda { |user| where(:user_id => user) }
@@ -142,10 +134,67 @@ class AssetUserAccess < ActiveRecord::Base
   def readable_name
     if self.asset_code && self.asset_code.match(/\:/)
       split = self.asset_code.split(/\:/)
-      if split[1] == self.context_code
-        # TODO: i18n
-        title = split[0] == "topics" ? "Discussions" : split[0].titleize
-        "#{self.context_type} #{title}"
+
+      if split[1].match(/course_\d+/)
+        case split[0]
+        when "announcements"
+          t("Course Announcements")
+        when "assignments"
+          t("Course Assignments")
+        when "calendar_feed"
+          t("Course Calendar")
+        when "collaborations"
+          t("Course Collaborations")
+        when "conferences"
+          t("Course Conferences")
+        when "files"
+          t("Course Files")
+        when "grades"
+          t("Course Grades")
+        when "home"
+          t("Course Home")
+        when "modules"
+          t("Course Modules")
+        when "outcomes"
+          t("Course Outcomes")
+        when "pages"
+          t("Course Pages")
+        when "quizzes"
+          t("Course Quizzes")
+        when "roster"
+          t("Course People")
+        when "speed_grader"
+          t("SpeedGrader")
+        when "syllabus"
+          t("Course Syllabus")
+        when "topics"
+          t("Course Discussions")
+        else
+          "Course #{split[0].titleize}"
+        end
+      elsif (match = split[1].match(/group_(\d+)/)) && (group = Group.where(:id => match[1]).first)
+        case split[0]
+        when "announcements"
+          t("%{group_name} - Group Announcements", :group_name => group.name)
+        when "calendar_feed"
+          t("%{group_name} - Group Calendar", :group_name => group.name)
+        when "collaborations"
+          t("%{group_name} - Group Collaborations", :group_name => group.name)
+        when "conferences"
+          t("%{group_name} - Group Conferences", :group_name => group.name)
+        when "files"
+          t("%{group_name} - Group Files", :group_name => group.name)
+        when "home"
+          t("%{group_name} - Group Home", :group_name => group.name)
+        when "pages"
+          t("%{group_name} - Group Pages", :group_name => group.name)
+        when "roster"
+          t("%{group_name} - Group People", :group_name => group.name)
+        when "topics"
+          t("%{group_name} - Group Discussions", :group_name => group.name)
+        else
+          "#{group.name} - Group #{split[0].titleize}"
+        end
       else
         self.display_name
       end
@@ -174,7 +223,6 @@ class AssetUserAccess < ActiveRecord::Base
     self.asset_group_code ||= accessed[:group_code]
     self.membership_type ||= accessed[:membership_type]
     self.context = kontext
-    self.summarized_at = nil
     self.last_access = Time.now.utc
     self.display_name = self.asset_display_name
     log_action(accessed[:level])

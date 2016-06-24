@@ -1,7 +1,7 @@
 define ['collaborations'], (collaborations) ->
 
   oldAjaxJSON = null
-  module "Events -> onDelete",
+  module "Collaborations",
     setup: ->
       oldAjaxJSON = $.ajaxJSON
       link= $("<a></a>")
@@ -17,6 +17,7 @@ define ['collaborations'], (collaborations) ->
       $("#fixtures").append(dom)
 
     teardown: ->
+      $("#delete_collaboration_dialog").remove()
       $("#fixtures").empty()
       $.ajaxJSON = oldAjaxJSON
 
@@ -33,3 +34,7 @@ define ['collaborations'], (collaborations) ->
       callback.call(responseData)
     collaborations.Events.onDelete(e)
     equal $.screenReaderFlashMessage.callCount, 1
+
+  test "returns a collaboration url", ->
+    url = collaborations.Util.collaborationUrl(1);
+    equal url, window.location.toString() + "/1"

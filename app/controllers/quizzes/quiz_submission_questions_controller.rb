@@ -50,7 +50,7 @@
 #
 class Quizzes::QuizSubmissionQuestionsController < ApplicationController
   include Api::V1::QuizSubmissionQuestion
-  include Filters::QuizSubmissions
+  include ::Filters::QuizSubmissions
 
   before_filter :require_user, :require_quiz_submission, :export_scopes
   before_filter :require_question, only: [ :show, :flag, :unflag ]
@@ -75,6 +75,10 @@ class Quizzes::QuizSubmissionQuestionsController < ApplicationController
     retrieve_quiz_submission_attempt!(params[:quiz_submission_attempt]) if params[:quiz_submission_attempt]
 
     reject! 'Cannot receive one question at a time questions in the API', 401 if @quiz.one_question_at_a_time && censored?
+
+    if @quiz_submission.completed? && !@quiz_submission.results_visible_for_user?(@current_user)
+      reject! "Cannot view questions due to quiz settings", 401
+    end
 
     if authorized_action(@quiz_submission, @current_user, :read)
       render json: quiz_submission_questions_json(@quiz_submission.quiz_questions,

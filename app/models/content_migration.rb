@@ -19,8 +19,7 @@
 class ContentMigration < ActiveRecord::Base
   include Workflow
   include TextHelper
-  belongs_to :context, :polymorphic => true
-  validates_inclusion_of :context_type, :allow_nil => true, :in => ['Course', 'Account', 'Group', 'User']
+  belongs_to :context, polymorphic: [:course, :account, :group, { context_user: 'User' }]
   validate :valid_date_shift_options
   belongs_to :user
   belongs_to :attachment
@@ -32,7 +31,10 @@ class ContentMigration < ActiveRecord::Base
   has_one :job_progress, :class_name => 'Progress', :as => :context
   serialize :migration_settings
   cattr_accessor :export_file_path
+  before_save :set_started_at_and_finished_at
   after_save :handle_import_in_progress_notice
+  after_save :check_for_blocked_migration
+
   DATE_FORMAT = "%m/%d/%Y"
 
   attr_accessible :context, :migration_settings, :user, :source_course, :copy_options, :migration_type, :initiated_source
@@ -40,6 +42,7 @@ class ContentMigration < ActiveRecord::Base
 
   workflow do
     state :created
+    state :queued
     #The pre_process states can be used by individual plugins as needed
     state :pre_processing
     state :pre_processed
@@ -61,6 +64,17 @@ class ContentMigration < ActiveRecord::Base
     can :manage_files and can :read
   end
 
+  def set_started_at_and_finished_at
+    if workflow_state_changed?
+      if pre_processing? || exporting? || importing?
+        self.started_at ||= Time.now.utc
+      end
+      if failed? || imported? || exported?
+        self.finished_at ||= Time.now.utc
+      end
+    end
+  end
+
   # the stream item context is decided by calling asset.context(user), i guess
   # to differentiate from the normal asset.context() call that may not give us
   # the context we want. in this case, they're one and the same.
@@ -74,7 +88,7 @@ class ContentMigration < ActiveRecord::Base
   end
 
   def migration_settings
-    read_attribute(:migration_settings) || write_attribute(:migration_settings,{}.with_indifferent_access)
+    read_or_initialize_attribute(:migration_settings, {}.with_indifferent_access)
   end
 
   def update_migration_settings(new_settings)
@@ -298,13 +312,17 @@ class ContentMigration < ActiveRecord::Base
     p
   end
 
-  def queue_migration(plugin=nil)
+  def queue_migration(plugin=nil, retry_count: 0, expires_at: nil)
     reset_job_progress
+
+    expires_at ||= Setting.get('content_migration_job_expiration_hours', '48').to_i.hours.from_now
+    return if blocked_by_current_migration?(plugin, retry_count, expires_at)
 
     set_default_settings
     plugin ||= Canvas::Plugin.find(migration_type)
     if plugin
-      queue_opts = {:priority => Delayed::LOW_PRIORITY, :max_attempts => 1}
+      queue_opts = {:priority => Delayed::LOW_PRIORITY, :max_attempts => 1,
+                    :expires_at => expires_at}
       if self.strand
         queue_opts[:strand] = self.strand
       else
@@ -315,7 +333,7 @@ class ContentMigration < ActiveRecord::Base
         # it's ready to be imported
         self.workflow_state = :importing
         self.save
-        self.send_later_enqueue_args(:import_content, queue_opts)
+        self.send_later_enqueue_args(:import_content, queue_opts.merge(:on_permanent_failure => :fail_with_error!))
       else
         # find worker and queue for conversion
         begin
@@ -342,6 +360,37 @@ class ContentMigration < ActiveRecord::Base
     end
   end
   alias_method :export_content, :queue_migration
+
+  def blocked_by_current_migration?(plugin, retry_count, expires_at)
+    running_cutoff = Setting.get('content_migration_job_block_hours', '4').to_i.hours.ago # at some point just let the jobs keep going
+
+    if self.context && self.context.content_migrations.
+      where(:workflow_state => %w{created queued pre_processing pre_processed exporting importing}).where("id < ?", self.id).
+      where("started_at > ?", running_cutoff).exists?
+
+      # there's another job already going so punt
+
+      if retry_count > 5
+        self.fail_with_error!(I18n.t("Blocked by running migration"))
+      else
+        self.workflow_state = :queued
+        self.save
+
+        run_at = Setting.get('content_migration_requeue_delay_minutes', '60').to_i.minutes.from_now
+        # if everything goes right, we'll queue it right away after the currently running one finishes
+        # but if something goes catastropically wrong, then make sure we recheck it eventually
+        job = self.send_later_enqueue_args(:queue_migration, {:no_delay => true, :run_at => run_at},
+          plugin, retry_count: retry_count + 1, expires_at: expires_at)
+
+        self.job_progress.delayed_job_id = job.id
+        self.job_progress.save!
+      end
+
+      return true
+    else
+      return false
+    end
+  end
 
   def set_default_settings
     if self.context && self.context.respond_to?(:root_account) && account = self.context.root_account
@@ -628,6 +677,8 @@ class ContentMigration < ActiveRecord::Base
     case key
     when 'quizzes'
       'quizzes:quiz'
+    when 'announcements'
+      'discussion_topic'
     else
       key.singularize
     end
@@ -739,11 +790,23 @@ class ContentMigration < ActiveRecord::Base
 
   def handle_import_in_progress_notice
     return unless context.is_a?(Course) && is_set?(migration_settings[:import_in_progress_notice])
-    if (new_record? || (workflow_state_changed? && workflow_state_was == 'created')) &&
+    if (new_record? || (workflow_state_changed? && %w{created queued}.include?(workflow_state_was))) &&
         %w(pre_processing pre_processed exporting importing).include?(workflow_state)
       context.add_content_notice(:import_in_progress, 4.hours)
     elsif workflow_state_changed? && %w(pre_process_error exported imported failed).include?(workflow_state)
       context.remove_content_notice(:import_in_progress)
+    end
+  end
+
+  def check_for_blocked_migration
+    if self.workflow_state_changed? && %w(pre_process_error exported imported failed).include?(workflow_state)
+      if self.context && (next_cm = self.context.content_migrations.where(:workflow_state => 'queued').order(:id).first)
+        job_id = next_cm.job_progress.delayed_job_id
+        if job_id && (job = Delayed::Job.where(:id => job_id, :locked_at => nil).first)
+          job.run_at = Time.now # it's okay to try it again now
+          job.save
+        end
+      end
     end
   end
 end

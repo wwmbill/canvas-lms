@@ -3,14 +3,14 @@ module UserSearch
   def self.for_user_in_context(search_term, context, searcher, session=nil, options = {})
     search_term = search_term.to_s
     return User.none if search_term.strip.empty?
-    base_scope = scope_for(context, searcher, options.slice(:enrollment_type, :enrollment_role, :enrollment_role_id, :exclude_groups, :enrollment_state))
+    base_scope = scope_for(context, searcher, options.slice(:enrollment_type, :enrollment_role, :enrollment_role_id, :exclude_groups, :enrollment_state, :include_inactive_enrollments))
     if search_term.to_s =~ Api::ID_REGEX
       db_id = Shard.relative_id_for(search_term, Shard.current, Shard.current)
-      user = base_scope.where(id: db_id).first
-      if user
-        return [user]
+      scope = base_scope.where(id: db_id)
+      if scope.exists?
+        return scope
       elsif !SearchTermHelper.valid_search_term?(search_term)
-        return []
+        return User.none
       end
       # no user found by id, so lets go ahead with the regular search, maybe this person just has a ton of numbers in their name
     end
@@ -48,12 +48,14 @@ module UserSearch
     enrollment_types = Array(options[:enrollment_type]) if options[:enrollment_type]
     enrollment_states = Array(options[:enrollment_state]) if options[:enrollment_state]
     include_prior_enrollments = !options[:enrollment_state].nil?
+    include_inactive_enrollments = !!options[:include_inactive_enrollments]
     exclude_groups = Array(options[:exclude_groups]) if options[:exclude_groups]
 
     users = if context.is_a?(Account)
-              User.of_account(context).active.select("users.id, users.name, users.short_name, users.sortable_name")
-            elsif context.is_a?(Course)
-              context.users_visible_to(searcher, include_prior_enrollments, enrollment_state: enrollment_states).uniq
+              User.of_account(context).active
+            elsif context.is_a?(Course) && !options.fetch(:force_users_visible_to, false)
+              context.users_visible_to(searcher, include_prior_enrollments,
+                enrollment_state: enrollment_states, include_inactive: include_inactive_enrollments).uniq
             else
               context.users_visible_to(searcher).uniq
             end
@@ -75,7 +77,7 @@ module UserSearch
       end
       users = users.where(conditions_sql, roles.map(&:id))
     elsif enrollment_types
-      enrollment_types = enrollment_types.map { |e| "#{e.capitalize}Enrollment" }
+      enrollment_types = enrollment_types.map { |e| "#{e.camelize}Enrollment" }
       if enrollment_types.any?{ |et| !Enrollment.readable_types.keys.include?(et) }
         raise ArgumentError, 'Invalid Enrollment Type'
       end
@@ -92,10 +94,10 @@ module UserSearch
   private
 
   def self.complex_sql
-    @_complex_sql ||= <<-SQL
+    <<-SQL
       (EXISTS (SELECT 1 FROM #{Pseudonym.quoted_table_name}
-         WHERE #{like_condition('pseudonyms.sis_user_id')} 
-           AND pseudonyms.user_id = users.id 
+         WHERE #{like_condition('pseudonyms.sis_user_id')}
+           AND pseudonyms.user_id = users.id
            AND pseudonyms.workflow_state='active')
        OR (#{like_condition('users.name')})
        OR EXISTS (SELECT 1 FROM #{CommunicationChannel.quoted_table_name}

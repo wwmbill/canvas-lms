@@ -1,4 +1,3 @@
-/** @jsx React.DOM */
 define([], function () {
   var StandardCellFocusMixin = {
     componentDidUpdate(previousProps, previousState) {
@@ -12,7 +11,7 @@ define([], function () {
         }
       }
 
-      if(isActiveCell && !gradeHasChanged) {
+      if(isActiveCell && !gradeHasChanged && !this.isConcluded()) {
         var gradeInput = this.refs.gradeInput.getDOMNode();
         gradeInput.select();
       }

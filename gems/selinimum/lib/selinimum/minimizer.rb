@@ -1,4 +1,5 @@
 require "set"
+require_relative "errors"
 
 module Selinimum
   class Minimizer
@@ -49,14 +50,14 @@ module Selinimum
       files.inject(Set.new) do |result, file|
         result.merge detector_for(file).dependents_for(file)
       end
-    rescue UnknownDependenciesError => e
+    rescue UnknownDependentsError => e
       warn "SELINIMUM: unable to find dependents of #{e}; testing all the things :(\n" \
            "though maybe this file is actually unused? if so, please to delete"
       raise
     end
 
     def detector_for(file)
-      detectors.detect { |detector| detector.can_process?(file) }
+      detectors.detect { |detector| detector.can_process?(file, spec_dependency_map) }
     end
 
     def warn(message)

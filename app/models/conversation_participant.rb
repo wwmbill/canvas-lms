@@ -27,13 +27,6 @@ class ConversationParticipant < ActiveRecord::Base
   # deprecated
   has_many :conversation_message_participants
 
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :conversation_id, :user_id, :last_message_at, :subscribed, :workflow_state, :last_authored_at, :has_attachments, :has_media_objects, :message_count,
-    :label, :tags, :visible_last_authored_at, :root_account_ids
-  ]
-
-  EXPORTABLE_ASSOCIATIONS = [:conversation, :user]
-
   after_destroy :destroy_conversation_message_participants
 
   scope :visible, -> { where("last_message_at IS NOT NULL") }
@@ -44,7 +37,7 @@ class ConversationParticipant < ActiveRecord::Base
   scope :sent, -> { where("visible_last_authored_at IS NOT NULL").order("visible_last_authored_at DESC, conversation_id DESC") }
   scope :for_masquerading_user, lambda { |user|
     # site admins can see everything
-    return scoped if user.account_users.map(&:account_id).include?(Account.site_admin.id)
+    return all if user.account_users.map(&:account_id).include?(Account.site_admin.id)
 
     # we need to ensure that the user can access *all* of each conversation's
     # accounts (and that each conversation has at least one account). so given
@@ -92,7 +85,7 @@ class ConversationParticipant < ActiveRecord::Base
   #   instantiated to get id)
   #
   tagged_scope_handler(/\Auser_(\d+)\z/) do |tags, options|
-    if (s = scoped.shard_value) && s.is_a?(Shard)
+    if (s = all.shard_value) && s.is_a?(Shard)
       scope_shard = s
     end
     scope_shard ||= Shard.current
@@ -249,24 +242,18 @@ class ConversationParticipant < ActiveRecord::Base
     }.merge(options)
 
     shard.activate do
-      if !options[:include_indirect_participants] && !options[:include_participant_contexts]
-        # this is cached in the conversation model
-        conversation.participants
-      else
-        # use a user specific cache record for the modified participant list
-        Rails.cache.fetch([conversation, user, 'participants', options].cache_key) do
-          participants = conversation.participants
-          if options[:include_indirect_participants]
-            user_ids = messages.map(&:all_forwarded_messages).flatten.map(&:author_id)
-            user_ids -= participants.map(&:id)
-            participants += Shackles.activate(:slave) { MessageableUser.available.where(:id => user_ids).to_a }
-          end
-          if options[:include_participant_contexts]
-            # we do this to find out the contexts they share with the user
-            user.load_messageable_users(participants, :strict_checks => false)
-          else
-            participants
-          end
+      Rails.cache.fetch([conversation, user, 'participants', options].cache_key) do
+        participants = conversation.participants
+        if options[:include_indirect_participants]
+          user_ids = messages.map(&:all_forwarded_messages).flatten.map(&:author_id)
+          user_ids -= participants.map(&:id)
+          participants += Shackles.activate(:slave) { MessageableUser.available.where(:id => user_ids).to_a }
+        end
+        if options[:include_participant_contexts]
+          # we do this to find out the contexts they share with the user
+          user.load_messageable_users(participants, :strict_checks => false)
+        else
+          participants
         end
       end
     end
@@ -411,7 +398,7 @@ class ConversationParticipant < ActiveRecord::Base
     # if starred were an actual boolean column, this is the method that would
     # be used to convert strings to appropriate boolean values (e.g. 'true' =>
     # true and 'false' => false)
-    val = ActiveRecord::ConnectionAdapters::Column.value_to_boolean(val)
+    val = Canvas::Plugin.value_to_boolean(val)
     write_attribute(:label, val ? 'starred' : nil)
   end
 
@@ -450,8 +437,8 @@ class ConversationParticipant < ActiveRecord::Base
         older = times.reject!{ |t| t <= last_message_at} || []
         older.first || times.reverse.first
       end
-      self.has_attachments = messages.with_attachments.first.present?
-      self.has_media_objects = messages.with_media_comments.first.present?
+      self.has_attachments = messages.with_attachments.exists?
+      self.has_media_objects = messages.with_media_comments.exists?
       self.visible_last_authored_at = if latest.author_id == user_id
         latest.created_at
       elsif latest_authored = last_authored_message
@@ -541,14 +528,14 @@ class ConversationParticipant < ActiveRecord::Base
   end
 
   def self.conversation_ids
-    raise "conversation_ids needs to be scoped to a user" unless scoped.where_values.any? do |v|
+    raise "conversation_ids needs to be scoped to a user" unless all.where_values.any? do |v|
       if v.is_a?(Arel::Nodes::Binary) && v.left.is_a?(Arel::Attributes::Attribute)
         v.left.name == 'user_id'
       else
         v =~ /user_id (?:= |IN \()\d+/
       end
     end
-    order = 'last_message_at DESC' unless scoped.order_values.present?
+    order = 'last_message_at DESC' unless all.order_values.present?
     self.order(order).pluck(:conversation_id)
   end
 

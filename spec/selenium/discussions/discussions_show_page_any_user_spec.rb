@@ -4,6 +4,7 @@ require 'nokogiri'
 
 describe "discussions" do
   include_context "in-process server selenium tests"
+  include DiscussionsCommon
 
   let(:course) { course_model.tap{|course| course.offer!} }
   let(:student) { student_in_course(course: course, name: 'student', active_all: true).user }
@@ -165,10 +166,10 @@ describe "discussions" do
         end
 
         it "should collapse and expand reply", priority: "1", test_id: 150486 do
-          f('.entry-content .entry-header').click
+          f('.entry-content .entry-header .collapse-discussion').click
           wait_for_ajaximations
           expect(fj("#entry-#{@entry1.id} .discussion-entry-reply-area .discussion-reply-action:visible")).to be_nil
-          f('.entry-content .entry-header').click
+          f('.entry-content .entry-header .collapse-discussion').click
           wait_for_ajaximations
           expect(fj("#entry-#{@entry1.id} .discussion-entry-reply-area .discussion-reply-action:visible")).to be_present
         end
@@ -191,14 +192,18 @@ describe "discussions" do
         end
 
         it "should show unread replies on clicking the unread button", priority: "1", test_id: 150489 do
-          expect(f('.new-and-total-badge .new-items').text).to eq('1')
-          expect(ffj('.discussion-entries .entry:visible').count).to eq(2)
+          keep_trying_until do
+            expect(f('.new-and-total-badge .new-items').text).to eq('1')
+            expect(ffj('.discussion-entries .entry:visible').count).to eq(2)
+          end
+          # click unread button
           f('.ui-button').click
           wait_for_ajaximations
           keep_trying_until do
             expect(f("#filterResults .discussion-title").text).to include('teacher')
             expect(ffj('.discussion-entries .entry:visible').count).to eq(1)
           end
+          # click unread button again
           f('.ui-button').click
           wait_for_ajaximations
           keep_trying_until do
@@ -242,6 +247,16 @@ describe "discussions" do
         end
       end
 
+      it "should not show keyboard shortcut modal during html editing", priority: "2", test_id: 846539 do
+        get url
+        f('.discussion-reply-action').click
+        wait_for_ajaximations
+        fln('HTML Editor').click
+        wait_for_ajaximations
+        f('.reply-textarea').send_keys("< , > , ?, /")
+        expect(f('.ui-dialog')).not_to be_displayed
+      end
+
       it "should strip embed tags inside user content object tags", priority: "2", test_id: 345485 do
         # this avoids the js translation of user content trying to embed the same content twice
         message = %{<object width="560" height="315"><param name="movie" value="http://www.youtube.com/v/VHRKdpR1E6Q?version=3&amp;hl=en_US"></param><param name="allowFullScreen" value="true"></param><param name="allowscriptaccess" value="always"></param><embed src="http://www.youtube.com/v/VHRKdpR1E6Q?version=3&amp;hl=en_US" type="application/x-shockwave-flash" width="560" height="315" allowscriptaccess="always" allowfullscreen="true"></embed></object>}
@@ -283,6 +298,7 @@ describe "discussions" do
         end
         topic.create_materialized_view
         get url
+        wait_for_ajaximations
         expect(ffj('.comment_attachments').count).to eq 10
         fj('.showMore').click
         wait_for_ajaximations
@@ -329,7 +345,7 @@ describe "discussions" do
         end
 
         it "should edit a side comment", priority: "1", test_id: 345491 do
-          edit_text = 'this has been edited '
+          edit_text = 'this has been edited'
           text = "new side comment from somebody"
           entry = topic.discussion_entries.create!(:user => somebody, :message => text, :parent_entry => entry)
           expect(topic.discussion_entries.last.message).to eq text

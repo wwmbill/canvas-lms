@@ -16,13 +16,16 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require File.expand_path(File.dirname(__FILE__) + '/../../sharding_spec_helper.rb')
 require File.expand_path(File.dirname(__FILE__) + '/../../spec_helper.rb')
 
 describe IncomingMail::MessageHandler do
+  specs_require_sharding
+
   let(:outgoing_from_address) { "no-reply@example.com" }
   let(:body) { "Hello" }
   let(:html_body) { "Hello" }
-  let(:original_message_id) { 1 }
+  let(:original_message_id) { Shard.short_id_for(@shard1.global_id_for(42)) }
   let(:secure_id) { "123abc" }
   let(:tag) { "#{secure_id}-#{original_message_id}" }
   let(:shard) do
@@ -118,11 +121,11 @@ describe IncomingMail::MessageHandler do
         end
 
         it "silently fails if the original message is missing" do
-          Message.expects(:where).with(id: 42).returns(stub(first: nil))
+          Message.expects(:where).with(id: original_message_id).returns(stub(first: nil))
           Message.any_instance.expects(:deliver).never
           Rails.cache.expects(:fetch).never
 
-          subject.handle(outgoing_from_address, body, html_body, incoming_message, "#{secure_id}-42")
+          subject.handle(outgoing_from_address, body, html_body, incoming_message, "#{secure_id}-#{original_message_id}")
         end
 
         it "silently fails if the address tag is invalid" do
@@ -188,7 +191,7 @@ describe IncomingMail::MessageHandler do
             message = stub("original message without user", original_message_attributes.merge(:context => nil))
             Message.stubs(:where).with(id: original_message_id).returns(stub(first: message))
 
-            email_subject = "Message Reply Failed: some subject"
+            email_subject = "Undelivered message"
             body = <<-BODY.strip_heredoc.strip
             The message titled "some subject" could not be delivered.  The message was sent to an unknown mailbox address.  If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
 
@@ -209,6 +212,7 @@ describe IncomingMail::MessageHandler do
             expected_bounce_message = Message.new(message_attributes)
             Message.expects(:new).with(message_attributes).returns(expected_bounce_message)
             Rails.cache.expects(:fetch).never
+            expected_bounce_message.expects(:deliver)
 
             subject.handle(outgoing_from_address, body, html_body, incoming_message, tag)
           end
@@ -219,7 +223,7 @@ describe IncomingMail::MessageHandler do
             Message.stubs(:where).with(id: original_message_id).returns(stub(first: original_message))
             context.expects(:reply_from).raises(IncomingMail::Errors::ReplyToLockedTopic.new)
 
-            email_subject = "Message Reply Failed: some subject"
+            email_subject = "Undelivered message"
             body = <<-BODY.strip_heredoc.strip
             The message titled "some subject" could not be delivered because the discussion topic is locked. If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
 
@@ -239,6 +243,7 @@ describe IncomingMail::MessageHandler do
             }
             expected_bounce_message = Message.new(message_attributes)
             Message.expects(:new).with(message_attributes).returns(expected_bounce_message)
+            expected_bounce_message.expects(:deliver)
 
             subject.handle(outgoing_from_address, body, html_body, incoming_message, tag)
           end
@@ -249,7 +254,7 @@ describe IncomingMail::MessageHandler do
             Message.stubs(:where).with(id: original_message_id).returns(stub(first: original_message))
             context.expects(:reply_from).raises(IncomingMail::Errors::UnknownAddress.new)
 
-            email_subject = "Message Reply Failed: some subject"
+            email_subject = "Undelivered message"
             body = <<-BODY.strip_heredoc.strip
             The message titled "some subject" could not be delivered.  The message was sent to an unknown mailbox address.  If you are trying to contact someone through Canvas you can try logging in to your account and sending them a message using the Inbox tool.
 
@@ -269,6 +274,7 @@ describe IncomingMail::MessageHandler do
             }
             expected_bounce_message = Message.new(message_attributes)
             Message.expects(:new).with(message_attributes).returns(expected_bounce_message)
+            expected_bounce_message.expects(:deliver)
 
             subject.handle(outgoing_from_address, body, html_body, incoming_message, tag)
           end

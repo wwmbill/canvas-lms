@@ -5,6 +5,9 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/google_drive_common'
 
 describe "collaborations" do
   include_context "in-process server selenium tests"
+  include CollaborationsCommon
+  include CollaborationsSpecsCommon
+  include GoogleDriveCommon
 
   context "a Student's" do
     title = 'Google Docs'
@@ -13,7 +16,7 @@ describe "collaborations" do
     context "#{title} collaboration" do
       before(:each) do
         course_with_student_logged_in
-        set_up_google_docs
+        setup_google_drive
       end
 
       it 'should be editable', priority: "1", test_id: 158504 do
@@ -36,7 +39,7 @@ describe "collaborations" do
     context "Google Docs collaborations with google docs not having access" do
       before(:each) do
         course_with_teacher_logged_in
-        set_up_google_docs(false)
+        setup_google_drive(false, false)
       end
 
       it 'should not be editable if google drive does not have access to your account', priority: "1", test_id: 162363 do

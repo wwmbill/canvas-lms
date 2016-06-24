@@ -26,7 +26,7 @@ class AccountAuthorizationConfig::LinkedIn < AccountAuthorizationConfig::Oauth2
   end
 
   def self.recognized_params
-    [ :login_attribute ].freeze
+    [ :login_attribute, :jit_provisioning ].freeze
   end
 
   def self.login_attributes
@@ -36,10 +36,6 @@ class AccountAuthorizationConfig::LinkedIn < AccountAuthorizationConfig::Oauth2
 
   def login_attribute
     super || 'id'.freeze
-  end
-
-  def login_button?
-    true
   end
 
   def unique_id(token)

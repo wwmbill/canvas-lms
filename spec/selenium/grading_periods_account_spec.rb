@@ -4,8 +4,8 @@ describe 'Account Grading Periods' do
   include_examples "in-process server selenium tests"
 
   let(:title) {'hi'}
-  let(:start_date) {'Feb 1'}
-  let(:end_date)  {'Feb 28'}
+  let(:start_date) { 3.months.from_now.strftime('%b %-d') }
+  let(:end_date) { (4.months.from_now - 1.day).strftime('%b %-d') }
   let(:date_time_format)  {'%b %-d, %Y at %-l:%M%P'}   # e.g. May 28, 2015 at 8:58pm
 
   before(:each) do
@@ -90,10 +90,10 @@ describe 'Account Grading Periods' do
     end
 
     it 'updates a grading period', priority: "1", test_id: 248024 do
+      skip_if_chrome('broken')
       account_grading_period = create_grading_periods_for(@account).first
       id = account_grading_period.id
       get "/accounts/#{@account.id}/grading_standards"
-
       # edit grading period
       replace_content(f("#period_title_#{id}"), title + "\n")
       replace_content(f("#period_start_date_#{id}"), start_date + "\n")

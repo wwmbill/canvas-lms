@@ -24,12 +24,13 @@ define [
         rowKey: "nullnullnull"
         labelledBy: "foo"
 
-      @dueDateCalendarPicker = React.render(DueDateCalendarPicker(props), $('<div>').appendTo('body')[0])
+      DueDateCalendarPickerElement = React.createElement(DueDateCalendarPicker, props)
+      @dueDateCalendarPicker = React.render(DueDateCalendarPickerElement, $('<div>').appendTo('body')[0])
 
     teardown: ->
       fakeENV.teardown()
       React.unmountComponentAtNode(@dueDateCalendarPicker.getDOMNode().parentNode)
-      @clock = sinon.restore()
+      @clock.restore()
 
   test 'renders', ->
     ok @dueDateCalendarPicker.isMounted()
@@ -39,7 +40,7 @@ define [
 
   test 'formattedDate returns a localized Date', ->
     snapshot = tz.snapshot()
-    tz.changeLocale(french, 'fr_FR')
+    tz.changeLocale(french, 'fr_FR', 'fr')
     I18nStubber.pushFrame()
     I18nStubber.setLocale 'fr_FR'
     I18nStubber.stub 'fr_FR',
@@ -85,12 +86,13 @@ define [
         rowKey: "nullnullnull"
         labelledBy: "foo"
 
-      @dueDateCalendarPicker = React.render(DueDateCalendarPicker(props), $('<div>').appendTo('body')[0])
+      DueDateCalendarPickerElement = React.createElement(DueDateCalendarPicker, props)
+      @dueDateCalendarPicker = React.render(DueDateCalendarPickerElement, $('<div>').appendTo('body')[0])
 
     teardown: ->
       fakeENV.teardown()
       React.unmountComponentAtNode(@dueDateCalendarPicker.getDOMNode().parentNode)
-      @clock = sinon.restore()
+      @clock.restore()
 
   test 'recieved proper class depending on dateType', ->
     classes = @dueDateCalendarPicker.refs.datePickerWrapper.props.className

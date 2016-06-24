@@ -3,6 +3,7 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/rubrics_common')
 
 describe "assignment rubrics" do
   include_context "in-process server selenium tests"
+  include RubricsCommon
 
   context "assignment rubrics as a teacher" do
     before(:each) do
@@ -22,6 +23,12 @@ describe "assignment rubrics" do
       @assignment
     end
 
+    def get(url)
+      super
+      # terrible... some rubric dom handlers get set after dom ready
+      sleep 1 if url =~ %r{\A/courses/\d+/assignments/\d+\z}
+    end
+
     def mark_rubric_for_grading(rubric, expect_confirmation)
       f("#rubric_#{rubric.id} .edit_rubric_link").click
       driver.switch_to.alert.accept if expect_confirmation
@@ -33,7 +40,6 @@ describe "assignment rubrics" do
       end
       wait_for_ajaximations
     end
-
 
     it "should add a new rubric", priority: "2", test_id: 56587 do
       get "/courses/#{@course.id}/outcomes"
@@ -63,6 +69,7 @@ describe "assignment rubrics" do
       create_assignment_with_points(initial_points)
       get "/courses/#{@course.id}/assignments/#{@assignment.id}"
       f('.add_rubric_link').click
+      check_element_has_focus(fj('.find_rubric_link:visible:first'))
       set_value(f('.rubric_title input[name="title"]'), rubric_name)
       criterion_points = fj('.criterion_points:visible')
       set_value(criterion_points, initial_points)

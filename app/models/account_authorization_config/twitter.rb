@@ -21,12 +21,8 @@ class AccountAuthorizationConfig::Twitter < AccountAuthorizationConfig::Oauth
   self.plugin = :twitter
   plugin_settings :consumer_key, consumer_secret: :consumer_secret_dec
 
-  def login_button?
-    true
-  end
-
   def self.recognized_params
-    [ :login_attribute ].freeze
+    [ :login_attribute, :jit_provisioning ].freeze
   end
 
   def self.login_attributes

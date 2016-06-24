@@ -177,7 +177,7 @@ require 'atom'
 #         },
 #         "topic_children": {
 #           "description": "An array of topic_ids for the group discussions the user is a part of.",
-#           "example": "[5, 7, 10]",
+#           "example": [5, 7, 10],
 #           "type": "array",
 #           "items": { "type": "integer"}
 #         },
@@ -212,8 +212,8 @@ require 'atom'
 #         },
 #         "permissions": {
 #           "description": "The current user's permissions on this topic.",
-#           "example": "{\"attach\"=>true}",
-#           "type": "map",
+#           "example": {"attach": true},
+#           "type": "object",
 #           "key": { "type": "string" },
 #           "value": { "type": "boolean" }
 #         },
@@ -237,11 +237,13 @@ require 'atom'
 #
 class DiscussionTopicsController < ApplicationController
   before_filter :require_context_and_read_access, :except => :public_feed
+  before_filter :rich_content_service_config
 
   include Api::V1::DiscussionTopics
   include Api::V1::Assignment
   include Api::V1::AssignmentOverride
   include KalturaHelper
+  include SubmittableHelper
 
   # @API List discussion topics
   #
@@ -268,7 +270,12 @@ class DiscussionTopicsController < ApplicationController
   #
   # @returns [DiscussionTopic]
   def index
-    return unless authorized_action(@context.discussion_topics.scoped.new, @current_user, :read)
+    if params[:only_announcements]
+      return unless authorized_action(@context.announcements.temp_record, @current_user, :read)
+    else
+      return unless authorized_action(@context.discussion_topics.temp_record, @current_user, :read)
+    end
+
     return child_topic if is_child_topic?
 
     scope = if params[:only_announcements]
@@ -277,7 +284,11 @@ class DiscussionTopicsController < ApplicationController
               @context.active_discussion_topics.only_discussion_topics
             end
 
-    scope = DiscussionTopic::ScopedToUser.new(@context, @current_user, scope).scope
+    # Specify the shard context, because downstream we use `union` which isn't
+    # cross-shard compatible.
+    @context.shard.activate do
+      scope = DiscussionTopic::ScopedToUser.new(@context, @current_user, scope).scope
+    end
 
     scope = if params[:order_by] == 'recent_activity'
               scope.by_last_reply_at
@@ -328,7 +339,7 @@ class DiscussionTopicsController < ApplicationController
                 lockedTopics: locked_topics,
                 newTopicURL: named_context_url(@context, :new_context_discussion_topic_url),
                 permissions: {
-                    create: @context.discussion_topics.scoped.new.grants_right?(@current_user, session, :create),
+                    create: @context.discussion_topics.temp_record.grants_right?(@current_user, session, :create),
                     moderate: user_can_moderate,
                     change_settings: user_can_edit_course_settings?,
                     manage_content: @context.grants_right?(@current_user, session, :manage_content),
@@ -337,8 +348,8 @@ class DiscussionTopicsController < ApplicationController
                 :discussion_topic_menu_tools => external_tools_display_hashes(:discussion_topic_menu)
         }
         append_sis_data(hash)
+        js_env(hash)
 
-        js_env(hash.merge(POST_GRADES: Assignment.sis_grade_export_enabled?(@context)))
         if user_can_edit_course_settings?
           js_env(SETTINGS_URL: named_context_url(@context, :api_v1_context_settings_url))
         end
@@ -372,7 +383,7 @@ class DiscussionTopicsController < ApplicationController
       hash =  {
         URL_ROOT: named_context_url(@context, :api_v1_context_discussion_topics_url),
         PERMISSIONS: {
-          CAN_CREATE_ASSIGNMENT: @context.respond_to?(:assignments) && @context.assignments.scoped.new.grants_right?(@current_user, session, :create),
+          CAN_CREATE_ASSIGNMENT: @context.respond_to?(:assignments) && @context.assignments.temp_record.grants_right?(@current_user, session, :create),
           CAN_ATTACH: @topic.grants_right?(@current_user, session, :attach),
           CAN_MODERATE: user_can_moderate
         }
@@ -398,7 +409,7 @@ class DiscussionTopicsController < ApplicationController
       if @topic.assignment.present?
         hash[:ATTRIBUTES][:assignment][:assignment_overrides] =
           (assignment_overrides_json(
-            @topic.assignment.overrides_for(@current_user)
+            @topic.assignment.overrides_for(@current_user, ensure_set_not_empty: true)
             ))
         hash[:ATTRIBUTES][:assignment][:has_student_submissions] = @topic.assignment.has_student_submissions?
       end
@@ -411,9 +422,13 @@ class DiscussionTopicsController < ApplicationController
                      reject { |category| category.student_organized? }.
                      map { |category| { id: category.id, name: category.name } },
                  CONTEXT_ID: @context.id,
-                 CONTEXT_ACTION_SOURCE: :discussion_topic,
-                 POST_GRADES: Assignment.sis_grade_export_enabled?(@context),
-                 DIFFERENTIATED_ASSIGNMENTS_ENABLED: @context.feature_enabled?(:differentiated_assignments)}
+                 CONTEXT_ACTION_SOURCE: :discussion_topic
+      }
+
+      post_to_sis = Assignment.sis_grade_export_enabled?(@context)
+      js_hash[:POST_TO_SIS] = post_to_sis
+      js_hash[:POST_TO_SIS_DEFAULT] = @context.account.sis_default_grade_export[:value] if post_to_sis && @topic.new_record?
+
       if @context.is_a?(Course)
         js_hash['SECTION_LIST'] = sections.map { |section|
           {
@@ -426,9 +441,12 @@ class DiscussionTopicsController < ApplicationController
         }
         js_hash['VALID_DATE_RANGE'] = CourseDateRange.new(@context)
       end
-
+      js_hash[:CANCEL_REDIRECT_URL] = cancel_redirect_url
       append_sis_data(js_hash)
       js_env(js_hash)
+
+      conditional_release_js_env(@topic.assignment)
+
       render :edit
     end
   end
@@ -452,19 +470,13 @@ class DiscussionTopicsController < ApplicationController
     end
 
     if authorized_action(@topic, @current_user, :read)
-      if @current_user && @topic.for_assignment? && !@topic.assignment.visible_to_user?(@current_user)
-        respond_to do |format|
-          flash[:error] = t "You do not have access to the requested discussion."
-          format.html { redirect_to named_context_url(@context, :context_discussion_topics_url) }
-        end
-        return
-      end
+      return unless enforce_assignment_visible(@topic)
       @headers = !params[:headless]
       @locked = @topic.locked_for?(@current_user, :check_policies => true, :deep_check_if_needed => true) || @topic.locked?
       @unlock_at = @topic.available_from_for(@current_user)
-      @topic.change_read_state('read', @current_user) unless @locked
+      @topic.change_read_state('read', @current_user) if @topic.visible_for?(@current_user)
       if @topic.for_group_discussion?
-        @groups = @topic.group_category.groups.active.select{ |g| g.grants_right?(@current_user, session, :post_to_forum) }
+        @groups = @topic.group_category.groups.active.select{ |g| g.grants_right?(@current_user, session, :post_to_forum) }.sort! {|a, b| a.id <=> b.id}
         topics = @topic.child_topics.to_a
         topics = topics.select{|t| @groups.include?(t.context) } unless @topic.grants_right?(@current_user, session, :update)
         @group_topics = @groups.map do |group|
@@ -633,12 +645,17 @@ class DiscussionTopicsController < ApplicationController
   # @argument sort_by_rating [Boolean]
   #   If true, entries will be sorted by rating.
   #
+  # @argument attachment [File]
+  #   A multipart/form-data form-field-style attachment.
+  #   Attachments larger than 1 kilobyte are subject to quota restrictions.
+  #
   # @example_request
   #     curl https://<canvas>/api/v1/courses/<course_id>/discussion_topics \
   #         -F title='my topic' \
   #         -F message='initial message' \
   #         -F podcast_enabled=1 \
   #         -H 'Authorization: Bearer <token>'
+  #         -F 'attachment=@<filename>' \
   #
   # @example_request
   #     curl https://<canvas>/api/v1/courses/<course_id>/discussion_topics \
@@ -744,7 +761,7 @@ class DiscussionTopicsController < ApplicationController
       respond_to do |format|
         format.html {
           flash[:notice] = t :topic_deleted_notice, "%{topic_title} deleted successfully", :topic_title => @topic.title
-          redirect_to named_context_url(@context, :context_discussion_topics_url)
+          redirect_to named_context_url(@context, @topic.is_announcement ? :context_announcements_url : :context_discussion_topics_url)
         }
         format.json  { render :json => @topic.as_json(:include => {:user => {:only => :name} } ), :status => :ok }
       end
@@ -786,7 +803,7 @@ class DiscussionTopicsController < ApplicationController
   #   (For example, "order=104,102,103".)
   #
   def reorder
-    if authorized_action(@context.discussion_topics.scoped.new, @current_user, :update)
+    if authorized_action(@context.discussion_topics.temp_record, @current_user, :update)
       order = Api.value_to_array(params[:order])
       reject! "order parameter required" unless order && order.length > 0
       topics = pinned_topics.where(id: order)
@@ -798,6 +815,15 @@ class DiscussionTopicsController < ApplicationController
   end
 
   protected
+
+  def rich_content_service_config
+    rce_js_env(:highrisk)
+  end
+
+  def cancel_redirect_url
+    topic_type = @topic.is_announcement ? :announcements : :discussion_topics
+    @topic.new_record? ? polymorphic_url([@context, topic_type]) : polymorphic_url([@context, @topic])
+  end
 
   def pinned_topics
     @context.active_discussion_topics.only_discussion_topics.where(pinned: true)
@@ -825,7 +851,7 @@ class DiscussionTopicsController < ApplicationController
   def process_discussion_topic(is_new = false)
     @errors = {}
     discussion_topic_hash = params.slice(*API_ALLOWED_TOPIC_FIELDS)
-    model_type = value_to_boolean(discussion_topic_hash.delete(:is_announcement)) && @context.announcements.scoped.new.grants_right?(@current_user, session, :create) ? :announcements : :discussion_topics
+    model_type = value_to_boolean(discussion_topic_hash.delete(:is_announcement)) && @context.announcements.temp_record.grants_right?(@current_user, session, :create) ? :announcements : :discussion_topics
     if is_new
       @topic = @context.send(model_type).build
     else
@@ -836,7 +862,11 @@ class DiscussionTopicsController < ApplicationController
 
     process_podcast_parameters(discussion_topic_hash)
 
-    @topic.send(is_new ? :user= : :editor=, @current_user)
+    if is_new
+      @topic.user = @current_user
+    elsif discussion_topic_hash.except(*%w{pinned}).present? # don't update editor if the only thing that changed was the pinned status
+      @topic.editor = @current_user
+    end
     @topic.current_user = @current_user
     @topic.content_being_saved_by(@current_user)
 
@@ -847,7 +877,14 @@ class DiscussionTopicsController < ApplicationController
     unless process_future_date_parameters(discussion_topic_hash)
       process_lock_parameters(discussion_topic_hash)
     end
+
     process_published_parameters(discussion_topic_hash)
+    if is_new && @topic.published? && params[:assignment]
+      @topic.unpublish
+      @topic.root_topic.try(:unpublish)
+      publish_later = true
+    end
+
     process_group_parameters(discussion_topic_hash)
     process_pin_parameters(discussion_topic_hash)
 
@@ -863,7 +900,13 @@ class DiscussionTopicsController < ApplicationController
 
         apply_positioning_parameters
         apply_attachment_parameters
-        apply_assignment_parameters
+        unless @topic.root_topic_id?
+          apply_assignment_parameters(params[:assignment], @topic)
+        end
+        if publish_later
+          @topic.publish!
+          @topic.root_topic.try(:publish!)
+        end
         render :json => discussion_topic_api_json(@topic.reload, @context, @current_user, session)
       else
         errors = @topic.errors.as_json[:errors]
@@ -991,7 +1034,7 @@ class DiscussionTopicsController < ApplicationController
                    params[:attachment]
 
       return if attachment && attachment.size > 1.kilobytes &&
-                quota_exceeded(named_context_url(@context, :context_discussion_topics_url))
+        quota_exceeded(@context, named_context_url(@context, :context_discussion_topics_url))
 
       if (params.has_key?(:remove_attachment) || attachment) && @topic.attachment
         @topic.transaction do
@@ -1010,34 +1053,6 @@ class DiscussionTopicsController < ApplicationController
     end
   end
 
-  def apply_assignment_parameters
-    # handle creating/deleting assignment
-    if params[:assignment] && !@topic.root_topic_id?
-      if params[:assignment].has_key?(:set_assignment) && !value_to_boolean(params[:assignment][:set_assignment])
-        if @topic.assignment && @topic.assignment.grants_right?(@current_user, session, :update)
-          assignment = @topic.assignment
-          @topic.assignment = nil
-          @topic.save!
-          assignment.discussion_topic = nil
-          assignment.destroy
-        end
-
-      elsif (@assignment = @topic.assignment || @topic.restore_old_assignment || (@topic.assignment = @context.assignments.build)) &&
-             @assignment.grants_right?(@current_user, session, :update)
-        params[:assignment][:group_category_id] = nil unless @topic.group_category_id || @assignment.has_submitted_submissions?
-        params[:assignment][:published] = @topic.published?
-        params[:assignment][:name] = @topic.title
-
-        assignment_params = params[:assignment].except('anonymous_peer_reviews')
-        update_api_assignment(@assignment, assignment_params, @current_user)
-        @assignment.submission_types = 'discussion_topic'
-        @assignment.saved_by = :discussion_topic
-        @topic.assignment = @assignment
-        @topic.save!
-      end
-    end
-  end
-
   def child_topic
     if params[:headless]
       extra_params = {
@@ -1046,13 +1061,9 @@ class DiscussionTopicsController < ApplicationController
         :student_id => params[:student_id]
       }
     end
+
     @root_topic = @context.context.discussion_topics.find(params[:root_discussion_topic_id])
-    @topic = @context.discussion_topics.where(root_topic_id: params[:root_discussion_topic_id]).first_or_initialize
-    @topic.message = @root_topic.message
-    @topic.title = @root_topic.title
-    @topic.assignment_id = @root_topic.assignment_id
-    @topic.user_id = @root_topic.user_id
-    @topic.save
+    @topic = @root_topic.ensure_child_topic_for(@context)
     redirect_to named_context_url(@context, :context_discussion_topic_url, @topic.id, extra_params)
   end
 
@@ -1063,7 +1074,7 @@ class DiscussionTopicsController < ApplicationController
   def handle_assignment_edit_params(hash)
     hash[:title] = params[:title] if params[:title]
     if params.slice(*[:due_at, :points_possible, :assignment_group_id]).present?
-      if hash[:assignment].nil? && @context.respond_to?(:assignments) && @context.assignments.scoped.new.grants_right?(@current_user, session, :create)
+      if hash[:assignment].nil? && @context.respond_to?(:assignments) && @context.assignments.temp_record.grants_right?(@current_user, session, :create)
         hash[:assignment] ||= {}
       end
 

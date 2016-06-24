@@ -5,6 +5,9 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/google_drive_common'
 
 describe "collaborations" do
   include_context "in-process server selenium tests"
+  include CollaborationsCommon
+  include CollaborationsSpecsCommon
+  include GoogleDriveCommon
 
   context "a student's" do
     title = 'Google Docs'
@@ -13,7 +16,7 @@ describe "collaborations" do
     context "#{title} collaboration" do
       before(:each) do
         course_with_student_logged_in
-        set_up_google_docs
+        setup_google_drive
       end
 
       it 'should display the new collaboration form if there are no existing collaborations', priority: "1", test_id: 162354 do
@@ -72,8 +75,11 @@ describe "collaborations" do
 
         user_session(@student)
         get "/courses/#{@course.id}/collaborations"
+        if link = f('.ic-flash-success .close_link')
+          link.click
+        end
 
-        fj("#groups-filter-btn-new:visible").click
+        move_to_click('label[for=groups-filter-btn-new]')
         wait_for_ajaximations
 
         expect(ffj('.available-groups:visible a').count).to eq 1

@@ -114,6 +114,12 @@ This identifier must not change for the user, and must be globally unique. In th
  this is called the SIS ID.</td>
 </tr>
 <tr>
+<td>integration_id</td>
+<td>text</td>
+<td>A secondary unique identifier useful for more complex SIS integrations.
+This identifier must not change for the user, and must be globally unique.</td>
+</tr>
+<tr>
 <td>login_id</td>
 <td>text</td>
 <td><b>Required field</b>. The name that a user will use to login to Instructure. If you have an
@@ -126,15 +132,23 @@ from the remote system.</td>
 <td><p>If the account is configured to use LDAP or an SSO protocol then
 this should not be set. Otherwise this is the password that will be used to
 login to Canvas along with the 'login_id' above.</p>
-<p>If the user already has a password (from previous a SIS import or
+<p>If the user already has a password (from a previous SIS import or
 otherwise) it will <em>not</em> be overwritten</p>
-<p>Setting the password will in most cases log the user out of Canvas. If 
-the user has managed to change their password in Canvas they will not be 
+<p>Setting the password will in most cases log the user out of Canvas. If
+the user has managed to change their password in Canvas they will not be
 affected by this.  This latter case would happen if your institution
 transitioned from using Canvas authentication to a SSO solution.
-For this reason it is important to not set this if you are using LDAP or an 
+For this reason it is important to not set this if you are using LDAP or an
 SSO protocol.</p>
 </td>
+</tr>
+<tr>
+<td>ssha_password</td>
+<td>text</td>
+<td>Instead of a plain-text password, you can pass a pre-hashed password using
+the SSHA password generation scheme in this field. While better than passing
+a plain text password, you should still encourage users to change their
+password after logging in for the first time.</td>
 </tr>
 <tr>
 <td>authentication_provider_id</td>
@@ -198,8 +212,7 @@ student to be able to log in but just not participate, leave the student
 
 Sample:
 
-<pre>
-user_id,login_id,authentication_provider_id,password,first_name,last_name,short_name,email,status
+<pre>user_id,login_id,authentication_provider_id,password,first_name,last_name,short_name,email,status
 01103,bsmith01,,,Bob,Smith,Bobby Smith,bob.smith@myschool.edu,active
 13834,jdoe03,google,,John,Doe,,john.doe@myschool.edu,active
 13aa3,psue01,7,,Peggy,Sue,,peggy.sue@myschool.edu,active
@@ -224,8 +237,10 @@ interface, this is called the SIS ID.</td>
 <tr>
 <td>parent_account_id</td>
 <td>text</td>
-<td>The account identifier of the parent account.
-If this is blank the parent account will be the root account.</td>
+<td><b>Required column</b>. The account identifier of the parent account.
+If this is blank the parent account will be the root account. Note that even if
+all values are blank, the column must be included to differentiate the file
+from a group import.</td>
 </tr>
 <tr>
 <td>name</td>
@@ -244,8 +259,7 @@ references it.
 
 Sample:
 
-<pre>
-account_id,parent_account_id,name,status
+<pre>account_id,parent_account_id,name,status
 A001,,Humanities,active
 A002,A001,English,active
 A003,A001,Spanish,active
@@ -291,8 +305,7 @@ interface, this is called the SIS ID.</td>
 
 Sample:
 
-<pre>
-term_id,name,status,start_date,end_date
+<pre>term_id,name,status,start_date,end_date
 T001,Winter2011,active,,
 T002,Spring2011,active,2013-1-03 00:00:00,2013-05-03 00:00:00-06:00
 T003,Fall2011,active,,
@@ -359,8 +372,7 @@ override the term end date.</p>
 
 Sample:
 
-<pre>
-course_id,short_name,long_name,account_id,term_id,status
+<pre>course_id,short_name,long_name,account_id,term_id,status
 E411208,ENG115,English 115: Intro to English,A002,,active
 R001104,BIO300,"Biology 300: Rocking it, Bio Style",A004,Fall2011,active
 A110035,ART105,"Art 105: ""Art as a Medium""",A001,,active
@@ -414,8 +426,7 @@ set, it will override the course and term end dates.</p>
 
 Sample:
 
-<pre>
-section_id,course_id,name,status,start_date,end_date
+<pre>section_id,course_id,name,status,start_date,end_date
 S001,E411208,Section 1,active,,
 S002,E411208,Section 2,active,,
 S003,R001104,Section 1,active,,
@@ -465,7 +476,7 @@ is specified the default section for the course will be used</td>
 <tr>
 <td>status</td>
 <td>enum</td>
-<td><b>Required field</b>. active, deleted, completed</td>
+<td><b>Required field</b>. active, deleted, completed, inactive</td>
 </tr>
 <tr>
 <td>associated_user_id</td>
@@ -480,11 +491,12 @@ Ignored for any role other than observer</td>
 When an enrollment is in a 'completed' state the student is limited to read-only access to the
 course.
 
+If in an 'inactive' state, the student will be listed in the course roster for teachers,
+but will not be able to view or participate in the course until the enrollment is activated.
 
 Sample:
 
-<pre>
-course_id,user_id,role,section_id,status
+<pre>course_id,user_id,role,section_id,status
 E411208,01103,student,1B,active
 E411208,13834,student,2A,active
 E411208,13aa3,teacher,2A,active
@@ -525,8 +537,7 @@ the root account.</td>
 
 Sample:
 
-<pre>
-group_id,account_id,name,status
+<pre>group_id,account_id,name,status
 G411208,A001,Group1,available
 G411208,,Group2,available
 G411208,,Group3,deleted
@@ -560,8 +571,7 @@ groups_membership.csv
 
 Sample:
 
-<pre>
-group_id,user_id,status
+<pre>group_id,user_id,status
 G411208,U001,accepted
 G411208,U002,accepted
 G411208,U003,deleted
@@ -603,8 +613,7 @@ provide more information about the cross-listed course, please do so in courses.
 
 Sample:
 
-<pre>
-xlist_course_id,section_id,status
+<pre>xlist_course_id,section_id,status
 E411208,1B,active
 E411208,2A,active
 E411208,2A,active

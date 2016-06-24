@@ -10,10 +10,6 @@ module Assignments
         @user = _user
       end
 
-      def da_enabled?
-        @da_enabled ||= course.feature_enabled?(:differentiated_assignments)
-      end
-
       def section_visibilities
         @section_visibilities ||= course.section_visibilities_for(user)
       end
@@ -29,7 +25,7 @@ module Assignments
 
     attr_reader :assignment, :user, :course_proxy
 
-    delegate :course, :da_enabled?, :section_visibilities, :visibility_level, :visible_section_ids, :to => :course_proxy
+    delegate :course, :section_visibilities, :visibility_level, :visible_section_ids, :to => :course_proxy
 
     def initialize(_assignment, _user, _course_proxy=nil)
       @assignment = _assignment
@@ -46,7 +42,7 @@ module Assignments
           else
             case visibility_level
             when :full, :limited
-              da_enabled? ? manual_count : assignment.needs_grading_count
+              manual_count
             when :sections
               section_filtered_submissions.count(:id, distinct: true)
             else
@@ -64,13 +60,16 @@ module Assignments
       # ignore submissions this user has graded
       graded_sub_ids = assignment.submissions.joins(:provisional_grades).
         where("moderated_grading_provisional_grades.final = ?", false).
-        where("moderated_grading_provisional_grades.scorer_id = ?", user.id).pluck(:id)
+        where("moderated_grading_provisional_grades.scorer_id = ?", user.id).
+        where("moderated_grading_provisional_grades.score IS NOT NULL").pluck(:id)
 
       moderation_set_student_ids = assignment.moderated_grading_selections.pluck(:student_id)
 
-      # ignore submissions that are fully graded
+      # ignore submissions that don't need any more provisional grades
       pg_scope = assignment.submissions.joins(:provisional_grades).
-        where("moderated_grading_provisional_grades.final = ?", false).group("submissions.id", "submissions.user_id")
+        where("moderated_grading_provisional_grades.final = ?", false).
+        where("moderated_grading_provisional_grades.scorer_id <> ?", user.id).
+        group("submissions.id", "submissions.user_id")
       pg_scope = pg_scope.where("submissions.id NOT IN (?)", graded_sub_ids) if graded_sub_ids.any?
       pg_scope.count.each do |key, count|
         sub_id, user_id = key
@@ -127,11 +126,9 @@ module Assignments
               AND (submissions.score IS NULL OR NOT submissions.grade_matches_current_submission)))
         SQL
 
-      if da_enabled?
-        string += <<-SQL
-          AND EXISTS (SELECT * FROM #{AssignmentStudentVisibility.quoted_table_name} asv WHERE asv.user_id = submissions.user_id AND asv.assignment_id = submissions.assignment_id)
-        SQL
-      end
+      string += <<-SQL
+        AND EXISTS (SELECT * FROM #{AssignmentStudentVisibility.quoted_table_name} asv WHERE asv.user_id = submissions.user_id AND asv.assignment_id = submissions.assignment_id)
+      SQL
       joined_submissions.where(string, assignment, course)
     end
 

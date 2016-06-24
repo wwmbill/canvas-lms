@@ -1,16 +1,15 @@
-/** @jsx React.DOM */
 define([
   'underscore',
   'react',
+  'jquery',
   'i18n!dashcards',
   'jsx/shared/ColorPicker',
-], function(_, React, I18n, ColorPickerComponent) {
+  'classnames'
+], function(_, React, $, I18n, ColorPicker, cx) {
 
   // ================
   //   COLOR PICKER
   // ================
-
-  var ColorPicker = React.createFactory(ColorPickerComponent);
 
   var SPACE_NEEDED_FOR_TOOLTIP = 300;
 
@@ -36,11 +35,20 @@ define([
       if (this.isMounted()) {
         var container = this.getDOMNode();
         var settingsToggle = this.props.settingsToggle.getDOMNode();
-        if (!$(container).is(e.target) &&
-              !$(settingsToggle).is(e.target) &&
-              $(container).has(e.target).length === 0
-           ) {
-          this.props.doneEditing();
+        if (!$.contains(container, e.target) && !$.contains(settingsToggle, e.target) && this.props.isOpen) {
+          this.props.doneEditing(e);
+        }
+      }
+    },
+
+    checkEsc: function(e){
+      if (e.keyCode != 27) {
+        return
+      }
+      if (this.isMounted()) {
+        var container = this.getDOMNode();
+        if ($.contains(container, document.activeElement) && this.props.isOpen) {
+          this.props.doneEditing(e);
         }
       }
     },
@@ -48,9 +56,11 @@ define([
     setHandlers: function(){
       $(window).resize( this.props.doneEditing );
       $(document).mouseup(this.closeIfClickedOutsideOf);
+      $(document).keyup(this.checkEsc);
     },
 
     unsetHandlers: function(){
+      $(document).unbind("keyup", this.checkEsc);
       $(document).unbind("mouseup", this.closeIfClickedOutsideOf);
       $(window).unbind("resize", this.props.doneEditing);
     },
@@ -64,7 +74,7 @@ define([
     },
 
     leftPlusElement: function(){
-      var parentWidth = $(this.props.parentNode).width();
+      var parentWidth = $(this.props.parentNode).outerWidth();
       return $(this.props.parentNode).offset().left + parentWidth;
     },
 
@@ -75,7 +85,7 @@ define([
     },
 
     topPosition: function(){
-      return $(this.props.parentNode).offset().top - $(window).scrollTop() - 6;
+      return $(this.props.parentNode).position().top - 6;
     },
 
     leftPosition: function(){
@@ -84,34 +94,42 @@ define([
         (this.leftPlusElement() - 360)
     },
 
-    pickerToolTipStyle: function(){
-      return {
-        position: 'absolute',
-        top: this.topPosition(),
-        left: this.leftPosition(),
-        zIndex: 9999
-      };
+    pickerToolTipStyle: function() {
+      if (this.props.isOpen) {
+        return {
+          position: 'absolute',
+          top: this.topPosition(),
+          left: this.leftPosition(),
+          zIndex: 9999
+        };
+      } else {
+        return {
+          display: 'none'
+        };
+      }
     },
 
     render: function () {
-      var cx = React.addons.classSet;
-
       var classes = cx({
         'ic-DashboardCardColorPicker': true,
-        'right': !this.tooltipOnRight(),
+        'right': this.isOpen && !this.tooltipOnRight(),
         'horizontal': true
       });
 
-      return(
-        <div className = {classes}
+      return (
+        <div id        = {this.props.elementID}
+             className = {classes}
              style     = {this.pickerToolTipStyle()} >
-          <ColorPicker isOpen           = {true}
+          <ColorPicker isOpen           = {this.props.isOpen}
                        assetString      = {this.props.assetString}
                        afterClose       = {this.props.doneEditing}
                        afterUpdateColor = {this.props.handleColorChange}
                        hidePrompt       = {true}
                        nonModal         = {true}
-                       currentColor     = {this.props.backgroundColor} />
+                       hideOnScroll     = {false}
+                       currentColor     = {this.props.backgroundColor}
+                       nicknameInfo     = {this.props.nicknameInfo}
+          />
         </div>
       )
     }

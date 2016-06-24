@@ -27,6 +27,7 @@ define([
   'compiled/quizzes/log_auditing',
   'compiled/quizzes/dump_events',
   'compiled/views/editor/KeyboardShortcuts',
+  'jsx/shared/rce/RichContentEditor',
   'jquery.ajaxJSON' /* ajaxJSON */,
   'jquery.toJSON',
   'jquery.instructure_date_and_time' /* friendlyDatetime, friendlyDate */,
@@ -34,17 +35,22 @@ define([
   'jqueryui/dialog',
   'jquery.instructure_misc_helpers' /* scrollSidebar */,
   'compiled/jquery.rails_flash_notifications',
-  'compiled/tinymce',
-  'tinymce.editor_box' /* editorBox */,
   'vendor/jquery.scrollTo' /* /\.scrollTo/ */,
   'compiled/behaviors/quiz_selectmenu'
 ], function(FileUploadQuestionView, File, I18n, $, autoBlurActiveInput, _,
             LDBLoginPopup, QuizTakingPolice, QuizLogAuditing,
-            QuizLogAuditingEventDumper, KeyboardShortcuts) {
+            QuizLogAuditingEventDumper, KeyboardShortcuts, RichContentEditor) {
+
+  RichContentEditor.preloadRemoteModule();
 
   var lastAnswerSelected = null;
   var lastSuccessfulSubmissionData = null;
   var showDeauthorizedDialog;
+
+  // need to keep a top level reference or
+  // it can get garbage collected
+  var quizTakingPoliceTopLevel = null;
+
   var quizSubmission = (function() {
     var timeMod = 0,
         endAt = $(".end_at"),
@@ -78,7 +84,7 @@ define([
       finalSubmitButtonClicked: false,
       clockInterval: 500,
       backupsDisabled: document.location.search.search(/backup=false/) > -1,
-      updateSubmission: function(repeat, beforeLeave, autoInterval) {
+      updateSubmission: function(repeat, beforeLeave, autoInterval, windowUnload) {
         /**
          * Transient: CNVS-9844
          * Disable auto-backups if backup=true was passed as a query parameter.
@@ -94,7 +100,7 @@ define([
         if((now - quizSubmission.lastSubmissionUpdate) < 1000 && !autoInterval) {
           return;
         }
-        if(quizSubmission.currentlyBackingUp) { return; }
+        if(quizSubmission.currentlyBackingUp && !windowUnload) { return; }
 
         quizSubmission.currentlyBackingUp = true;
         quizSubmission.lastSubmissionUpdate = new Date();
@@ -108,6 +114,7 @@ define([
         $lastSaved.text(I18n.t('saving', 'Saving...'));
         var url = $(".backup_quiz_submission_url").attr('href');
         // If called before leaving the page (ie. onbeforeunload), we can't use any async or FF will kill the PUT request.
+        data.leaving = !!windowUnload && !this.oneAtATime;
         if (beforeLeave){
           $.flashMessage(I18n.t('saving', 'Saving...'));
           $.ajax({
@@ -402,7 +409,7 @@ define([
 
       window.onbeforeunload = function(e) {
         if (!quizSubmission.navigatingToRelogin) {
-          quizSubmission.updateSubmission(false, true);
+          quizSubmission.updateSubmission(false, true, false, true);
           if(!quizSubmission.submitting && !quizSubmission.alreadyAcceptedNavigatingAway && !unloadWarned) {
             setTimeout(function() { unloadWarned = false; }, 0);
             unloadWarned = true;
@@ -496,6 +503,10 @@ define([
           var val = parseFloat($this.val().replace(/,/g, ''));
           $this.val(isNaN(val) ? "" : val.toFixed(4));
         }
+        if ($this.hasClass('precision_question_input')) {
+          var val = parseFloat($this.val().replace(/,/g, ''));
+          $this.val(isNaN(val) ? "" : val.toPrecision(16).replace(/\.?0+(e.*)?$/,"$1"));
+        }
         if (update !== false) {
           quizSubmission.updateSubmission();
         }
@@ -546,7 +557,14 @@ define([
         }
 
         if (tagName == "TEXTAREA") {
-          val = $this.editorBox('get_code');
+          val = RichContentEditor.callOnRCE($this, 'get_code');
+          var $tagInstance = $this;
+          $this.siblings('.rce_links').find('.toggle_question_content_views_link').click(function(event) {
+            event.preventDefault();
+            RichContentEditor.callOnRCE($tagInstance, 'toggle');
+            //  todo: replace .andSelf with .addBack when JQuery is upgraded.
+            $(this).siblings(".toggle_question_content_views_link").andSelf().toggle();
+          });
         } else if ($this.attr('type') == "text" || $this.attr('type') == 'hidden') {
           val = $this.val();
         } else if (tagName == "SELECT") {
@@ -567,11 +585,6 @@ define([
 
     $questions.find(".question_input").trigger('change', [false, {}]);
 
-    setInterval(function() {
-      $("textarea.question_input").each(function() {
-        $(this).triggerHandler('change', false);
-      });
-    }, 2500);
 
     $(".hide_time_link").click(function(event) {
       event.preventDefault();
@@ -659,20 +672,20 @@ define([
     setTimeout(function() {
       $(".question_holder textarea.question_input").each(function() {
         $(this).attr('id', 'question_input_' + quizSubmission.contentBoxCounter++);
-        $(this).editorBox();
+        RichContentEditor.loadNewEditor($(this));
       });
     }, 2000);
 
     if (QuizTakingPolice) {
-      var quizTakingPolice = new QuizTakingPolice();
+      quizTakingPoliceTopLevel = new QuizTakingPolice();
 
-      quizTakingPolice.addEventListener('message', function(e) {
+      quizTakingPoliceTopLevel.addEventListener('message', function(e) {
         if (e.data === 'stopwatchTick') {
           quizSubmission.updateTime();
         }
       });
 
-      quizTakingPolice.postMessage({
+      quizTakingPoliceTopLevel.postMessage({
         code: 'startStopwatch',
         frequency: quizSubmission.clockInterval
       });
@@ -762,5 +775,10 @@ define([
     }
   });
 
-  $('.essay_question .answers').before((new KeyboardShortcuts()).render().el);
+  $( document ).ready(function() {
+    $('.loaded').show();
+    $('.loading').hide();
+  });
+
+  $('.essay_question .answers .rce_links').append((new KeyboardShortcuts()).render().el);
 });

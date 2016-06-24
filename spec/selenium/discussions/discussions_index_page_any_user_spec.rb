@@ -2,6 +2,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../helpers/discussions_commo
 
 describe "discussions" do
   include_context "in-process server selenium tests"
+  include DiscussionsCommon
 
   let(:course) { course_model.tap{|course| course.offer!} }
   let(:student) { student_in_course(course: course, name: 'student', active_all: true).user }
@@ -55,13 +56,16 @@ describe "discussions" do
       end
 
       describe "subscription icon" do
+
         it "should allow subscribing to a topic", priority: "1", test_id: 270931 do
           topic.unsubscribe(somebody)
           get(url)
+          wait_for_subscription_icon_to_load("icon-discussion")
           expect(f('.icon-discussion')).to be_displayed
           f('.subscription-toggler').click
           wait_for_ajaximations
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})
+          wait_for_subscription_icon_to_load("icon-discussion-check")
           expect(f('.icon-discussion')).to be_nil
           expect(f('.icon-discussion-check')).to be_displayed
           topic.reload
@@ -72,10 +76,12 @@ describe "discussions" do
           topic.subscribe(somebody)
           get(url)
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})
+          wait_for_subscription_icon_to_load('icon-discussion-check')
           expect(f('.icon-discussion-check')).to be_displayed
           f('.subscription-toggler').click
           wait_for_ajaximations
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})
+          wait_for_subscription_icon_to_load('icon-discussion')
           expect(f('.icon-discussion-check')).to be_nil
           expect(f('.icon-discussion')).to be_displayed
           topic.reload

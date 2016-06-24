@@ -4,10 +4,12 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/submissions_common')
 
 describe "submissions" do
   include_context "in-process server selenium tests"
+  include FilesCommon
+  include SubmissionsCommon
 
   context 'as a teacher' do
 
-    before (:each) do
+    before(:each) do
       course_with_teacher_logged_in
     end
 
@@ -41,11 +43,12 @@ describe "submissions" do
 
   context "student view" do
 
-    before (:each) do
+    before(:each) do
       course_with_teacher_logged_in
     end
 
     it "should allow a student view student to view/submit assignments", priority: "1", test_id: 237034 do
+      skip_if_chrome('Student view breaks test in Chrome')
       @assignment = @course.assignments.create(
           :title => 'Cool Assignment',
           :points_possible => 10,
@@ -60,7 +63,7 @@ describe "submissions" do
       assignment_form = f('#submit_online_text_entry_form')
       wait_for_tiny(assignment_form)
 
-      type_in_tiny('#submission_body', 'my assigment submission')
+      type_in_tiny('#submission_body', 'my assignment submission')
       expect_new_page_load { submit_form(assignment_form) }
 
       expect(@course.student_view_student.submissions.count).to eq 1
@@ -68,6 +71,7 @@ describe "submissions" do
     end
 
     it "should allow a student view student to submit file upload assignments", priority: "1", test_id: 237035 do
+      skip_if_chrome('Student view breaks test in Chrome')
       @assignment = @course.assignments.create(
           :title => 'Cool Assignment',
           :points_possible => 10,

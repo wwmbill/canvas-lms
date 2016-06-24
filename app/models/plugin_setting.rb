@@ -85,8 +85,10 @@ class PluginSetting < ActiveRecord::Base
           value = settings.delete(key)
           settings.delete("#{key}_dec".to_sym)
           if value == DUMMY_STRING  # no change, use what was there previously
-            settings["#{key}_enc".to_sym] = settings_was["#{key}_enc".to_sym]
-            settings["#{key}_salt".to_sym] = settings_was["#{key}_salt".to_sym]
+            unless settings_was.nil? # we wont have setting_was if we are a new plugin
+              settings["#{key}_enc".to_sym] = settings_was["#{key}_enc".to_sym]
+              settings["#{key}_salt".to_sym] = settings_was["#{key}_salt".to_sym]
+            end
           else
             settings["#{key}_enc".to_sym], settings["#{key}_salt".to_sym] = self.class.encrypt(value)
           end
@@ -126,7 +128,7 @@ class PluginSetting < ActiveRecord::Base
   end
 
   def clear_cache
-    connection.after_transaction_commit do
+    self.class.connection.after_transaction_commit do
       MultiCache.delete(PluginSetting.settings_cache_key(self.name))
     end
   end
@@ -142,4 +144,7 @@ class PluginSetting < ActiveRecord::Base
   def self.find_by_name(name)
     where(name: name).first
   end
+
+  # stub for plugins who want to do something fancy
+  def self.current_account=(_); end
 end

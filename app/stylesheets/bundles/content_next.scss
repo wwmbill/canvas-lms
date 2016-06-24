@@ -1,3 +1,5 @@
+@import "base/_environment.scss";
+
 .context_module .items {
   min-height: 10px; /* sortable on empty */
 }
@@ -42,7 +44,7 @@
 
 .unlock_at_text {
   font-weight: normal;
-  font-size: 12px;
+  @include fontSize(12px);
 }
 
 .add_module_item_link {
@@ -71,9 +73,15 @@
     max-width: 350px;
 
     .prerequisites_message {
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      word-break: break-all;
+      word-break: break-word;
+      hyphens: auto;
+
       display: flex;
       align-items: center;
-      font-size: 12px;
+      @include fontSize(12px);
       margin: 0;
     }
   }
@@ -176,7 +184,7 @@
 .context_module_item .item_name .title {
   padding: 0;
   color: inherit;
-  font-size: 13px;
+  @include fontSize(13px);
 }
 
 .context_module_placeholder {
@@ -210,6 +218,9 @@ input.move-module-label-spacer {
 .prereq-req-item {
   flex: 1 1 1;
   padding-right: 5px;
+  .option {
+    display: block;
+  }
 }
 
 .points_possible {
@@ -259,4 +270,8 @@ input.move-module-label-spacer {
   width:1px;
   height:1px;
   overflow:hidden;
+}
+
+.require-sequential {
+  margin-left: 20px;
 }

@@ -18,6 +18,7 @@
 require 'nokogiri'
 require 'cgi'
 require 'iconv'
+require 'active_support'
 require 'active_support/core_ext'
 require 'sanitize'
 require 'canvas_text_helper'
@@ -25,7 +26,7 @@ require 'canvas_text_helper'
 module HtmlTextHelper
   def self.strip_tags(text)
     text ||= ""
-    text.gsub(/<\/?[^>\n]*>/, "").gsub(/&#\d+;/) { |m| puts m; m[2..-1].to_i.chr(text.encoding) rescue '' }.gsub(/&\w+;/, "")
+    text.gsub(/<\/?[^<>\n]*>?/, "").gsub(/&#\d+;/) { |m| puts m; m[2..-1].to_i.chr(text.encoding) rescue '' }.gsub(/&\w+;/, "")
   end
 
   def strip_tags(text)
@@ -217,7 +218,7 @@ module HtmlTextHelper
                               link = s
                               link = "http://#{link}" if link[0, 3] == 'www'
                               link = add_notification_to_link(link, opts[:notification_id]) if opts[:notification_id]
-                              link = URI.escape(link).gsub("'", "%27")
+                              link = link.gsub("'", "%27")
                               links << link
                               "<a href='#{ERB::Util.h(link)}'>#{ERB::Util.h(s)}</a>"
                             end

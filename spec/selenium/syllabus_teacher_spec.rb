@@ -4,6 +4,7 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/files_common')
 
 describe "course syllabus" do
   include_context "in-process server selenium tests"
+  include FilesCommon
 
   def add_assignment(title, points)
     #assignment data
@@ -24,7 +25,6 @@ describe "course syllabus" do
 
     before (:each) do
       course_with_teacher_logged_in
-
       @group = @course.assignment_groups.create!(:name => 'first assignment group')
       @assignment_1 = add_assignment('first assignment title', 50)
       @assignment_2 = add_assignment('second assignment title', 100)
@@ -43,6 +43,7 @@ describe "course syllabus" do
       new_description = "new syllabus description"
       f('.edit_syllabus_link').click
       # check that the wiki sidebar is visible
+      wait_for_ajaximations
       expect(f('#editor_tabs .wiki-sidebar-header')).to include_text("Insert Content into the Page")
       edit_form = f('#edit_course_syllabus_form')
       wait_for_tiny(keep_trying_until { f('#edit_course_syllabus_form') })

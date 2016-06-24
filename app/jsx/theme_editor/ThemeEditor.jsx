@@ -1,25 +1,19 @@
-/** @jsx React.DOM */
-
 define([
   'i18n!theme_editor',
   'react',
   'jquery',
-  'react-modal',
   'underscore',
   'str/htmlEscape',
   'compiled/fn/preventDefault',
   'compiled/models/Progress',
-  'jsx/shared/ProgressBar',
   './PropTypes',
   './ThemeEditorAccordion',
   './SharedBrandConfigPicker',
-  './ThemeEditorFileUpload'
-], (I18n, React, $, Modal, _, htmlEscape, preventDefault, Progress, ProgressBar, customTypes, ThemeEditorAccordion, SharedBrandConfigPicker, ThemeEditorFileUpload) => {
+  './ThemeEditorFileUpload',
+  './ThemeEditorModal'
+], (I18n, React, $, _, htmlEscape, preventDefault, Progress, customTypes, ThemeEditorAccordion, SharedBrandConfigPicker, ThemeEditorFileUpload, ThemeEditorModal) => {
 
 /*eslint no-alert:0*/
-
-  Modal.setAppElement(document.body)
-
   var TABS = [
     {
       id: 'te-editor',
@@ -46,6 +40,12 @@ define([
     }
   }
 
+  function filterCompleteProgresses (progresses) {
+    return _.select(progresses, (p) => {
+      return p.completion !== 100
+    })
+  }
+
   function submitHtmlForm(action, method, md5) {
     $(`
       <form hidden action="${htmlEscape(action)}" method="POST">
@@ -66,21 +66,27 @@ define([
       variableSchema: customTypes.variableSchema,
       sharedBrandConfigs: customTypes.sharedBrandConfigs,
       allowGlobalIncludes: React.PropTypes.bool,
-      accountID: React.PropTypes.string
+      accountID: React.PropTypes.string,
+      highContrast: React.PropTypes.bool
+    },
+
+    getDefaultProps: function() {
+      if (window.ENV.use_high_contrast) {
+        return { highContrast: true }
+      }
+      else {
+        return { highContrast: false }
+      }
     },
 
     getInitialState() {
       return {
         changedValues: {},
         showProgressModal: false,
-        progress: 0
+        progress: 0,
+        showSubAccountProgress: false,
+        activeSubAccountProgresses: []
       }
-    },
-
-    invalidForm() {
-      return Object.keys(this.state.changedValues).some((key) => {
-        return this.state.changedValues[key].invalid
-      })
     },
 
     changeSomething(variableName, newValue, isInvalid) {
@@ -91,8 +97,10 @@ define([
       })
     },
 
-    onProgress(data) {
-      this.setState({progress: data.completion})
+    invalidForm() {
+      return Object.keys(this.state.changedValues).some((key) => {
+        return this.state.changedValues[key].invalid
+      })
     },
 
     somethingHasChanged() {
@@ -141,10 +149,6 @@ define([
       return val
     },
 
-    saveToSession(md5) {
-      submitHtmlForm('/accounts/'+this.props.accountID+'/brand_configs/save_to_user_session', 'POST', md5)
-    },
-
     handleCancelClicked() {
       if (this.props.hasUnsavedChanges || this.somethingHasChanged()) {
         var msg = I18n.t('You are about to lose any changes that you have not yet applied to your account.\n\n' +
@@ -156,9 +160,8 @@ define([
       submitHtmlForm('/accounts/'+this.props.accountID+'/brand_configs', 'DELETE');
     },
 
-    handleApplyClicked() {
-      var msg = I18n.t('This will apply these changes to your entire account. Would you like to proceed?')
-      if (window.confirm(msg)) submitHtmlForm('/accounts/'+this.props.accountID+'/brand_configs/save_to_account', 'POST')
+    saveToSession(md5) {
+      submitHtmlForm('/accounts/'+this.props.accountID+'/brand_configs/save_to_user_session', 'POST', md5)
     },
 
     handleFormSubmit() {
@@ -185,6 +188,74 @@ define([
         window.alert(I18n.t('An error occurred trying to generate this theme, please try again.'))
         this.setState({showProgressModal: false})
       })
+    },
+
+    onProgress(data) {
+      this.setState({progress: data.completion})
+    },
+
+    handleApplyClicked() {
+      var msg = I18n.t('This will apply these changes to your entire account. Would you like to proceed?');
+      if (window.confirm(msg)) {
+        this.kickOffSubAcountCompilation();
+      }
+    },
+
+    redirectToAccount() {
+      window.location.replace("/accounts/"+this.props.accountID+"?theme_applied=1");
+    },
+
+    kickOffSubAcountCompilation() {
+      $.ajax({
+        url: '/accounts/'+this.props.accountID+'/brand_configs/save_to_account',
+        type: 'POST',
+        data: new FormData(this.refs.ThemeEditorForm.getDOMNode()),
+        processData: false,
+        contentType: false,
+        dataType: "json"
+      })
+      .pipe((resp) => {
+        if (!resp.subAccountProgresses || _.isEmpty(resp.subAccountProgresses)) {
+          this.redirectToAccount()
+        } else {
+          this.openSubAccountProgressModal();
+          this.filterAndSetActive(resp.subAccountProgresses)
+          return resp.subAccountProgresses.map( (prog) => {
+            return new Progress(prog).poll().progress(this.onSubAccountProgress)
+          })
+        }
+      })
+      .fail(() => {
+        window.alert(I18n.t('An error occurred trying to apply this theme, please try again.'))
+      })
+    },
+
+    onSubAccountProgress(data) {
+      var newSubAccountProgs = _.map(this.state.activeSubAccountProgresses, (progress) => {
+        return progress.tag == data.tag ?
+          data :
+          progress
+      })
+
+      this.filterAndSetActive(newSubAccountProgs)
+
+      if ( _.isEmpty(this.state.activeSubAccountProgresses)) {
+        this.closeSubAccountProgressModal();
+        this.redirectToAccount();
+      }
+    },
+
+    filterAndSetActive(progresses) {
+      var activeProgs = filterCompleteProgresses(progresses)
+      this.setState({activeSubAccountProgresses: activeProgs})
+    },
+
+    openSubAccountProgressModal() {
+      this.setState({ showSubAccountProgress: true });
+    },
+
+    closeSubAccountProgressModal() {
+      this.setState({ showSubAccountProgress: false });
     },
 
     renderTabInputs() {
@@ -218,6 +289,25 @@ define([
     render() {
       return (
         <div id="main">
+          {
+            this.props.highContrast ? (
+              <div role="alert" className="ic-flash-static ic-flash-error">
+                <h4 className="ic-flash__headline">
+                  <i aria-hidden="true" className="icon-warning" />&nbsp;
+                  {I18n.t('You will not be able to preview your changes')}
+                </h4>
+                <p
+                  className="ic-flash__text"
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      I18n.t('To preview Theme Editor branding, you will need to *turn off High Contrast UI*.', {
+                        wrappers: ['<a href="/profile/settings">$1</a>']
+                      })
+                    }}
+                />
+              </div>
+            ) : null
+          }
           <form
             ref="ThemeEditorForm"
             onSubmit={preventDefault(this.handleFormSubmit)}
@@ -273,7 +363,9 @@ define([
 
                   { this.renderTabInputs() }
 
-                  { this.renderTabLabels() }
+                  <div className="Theme__editor-tab-label-layout">
+                    { this.renderTabLabels() }
+                  </div>
 
                   <div id="te-editor-panel" className="Theme__editor-tabs_panel">
                     <SharedBrandConfigPicker
@@ -295,15 +387,33 @@ define([
                   { this.props.allowGlobalIncludes ?
                     <div id="te-upload-panel" className="Theme__editor-tabs_panel">
                       <div className="Theme__editor-upload-overrides">
+                        <div className="Theme__editor-upload-warning">
+                          <div className="Theme__editor-upload-warning_icon">
+                            <i className="icon-warning" />
+                          </div>
+                          <div>
+                            <p className="Theme__editor-upload-warning_text-emphasis">
+                              {I18n.t('Custom CSS and Javascript may cause accessibility issues or conflicts with future Canvas updates!')}
+                            </p>
+                            <p
+                              dangerouslySetInnerHTML={{
+                                __html:
+                                  I18n.t('Before implementing custom CSS or Javascript, please refer to *our documentation*.', {
+                                    wrappers: ['<a href="https://community.canvaslms.com/docs/DOC-3010" target="_blank">$1</a>']
+                                  })
+                                }}
+                            />
+                          </div>
+                        </div>
 
                         <div className="Theme__editor-upload-overrides_header">
-                          { I18n.t('Upload CSS and JavaScript files to include on all page loads for your account') }
+                          { I18n.t('File(s) will be included on all pages in the Canvas desktop application.') }
                         </div>
 
                         <div className="Theme__editor-upload-overrides_form">
 
                           <ThemeEditorFileUpload
-                            label={I18n.t('Upload a CSS file...')}
+                            label={I18n.t('CSS file')}
                             accept=".css"
                             name="css_overrides"
                             currentValue={this.props.brandConfig.css_overrides}
@@ -312,7 +422,7 @@ define([
                           />
 
                           <ThemeEditorFileUpload
-                            label={I18n.t('Upload a JS file...')}
+                            label={I18n.t('JavaScript file')}
                             accept=".js"
                             name="js_overrides"
                             currentValue={this.props.brandConfig.js_overrides}
@@ -325,13 +435,13 @@ define([
                       <div className="Theme__editor-upload-overrides">
 
                         <div className="Theme__editor-upload-overrides_header">
-                          { I18n.t('CSS and JavaScript to load when user content is displayed in the canvas iOS or Android native apps') }
+                          { I18n.t('File(s) will be included when user content is displayed within Canvas iOS or Android apps.') }
                         </div>
 
                         <div className="Theme__editor-upload-overrides_form">
 
                           <ThemeEditorFileUpload
-                            label={I18n.t('Upload a CSS file...')}
+                            label={I18n.t('Mobile CSS file')}
                             accept=".css"
                             name="mobile_css_overrides"
                             currentValue={this.props.brandConfig.mobile_css_overrides}
@@ -340,7 +450,7 @@ define([
                           />
 
                           <ThemeEditorFileUpload
-                            label={I18n.t('Upload a JS file...')}
+                            label={I18n.t('Mobile JavaScript file')}
                             accept=".js"
                             name="mobile_js_overrides"
                             currentValue={this.props.brandConfig.mobile_js_overrides}
@@ -371,7 +481,7 @@ define([
                     </button>
                   </div>
                 : null }
-                <iframe id="previewIframe" ref="previewIframe" src="/theme-preview/?editing_brand_config=1" />
+                <iframe id="previewIframe" ref="previewIframe" src={"/accounts/"+this.props.accountID+"/theme-preview/?editing_brand_config=1"} title={I18n.t('Preview')} />
               </div>
 
             </div>
@@ -381,20 +491,11 @@ define([
             <input type="hidden" name="_workaround_for_IE_10_and_11_formdata_bug" />
           </form>
 
-          <Modal
-            isOpen={this.state.showProgressModal}
-            className='ReactModal__Content--canvas ReactModal__Content--mini-modal'
-            overlayClassName='ReactModal__Overlay--Theme__editor_progress'>
-            <div className="Theme__editor_progress">
-              <h4>{I18n.t('Generating Preview...')}</h4>
-              <ProgressBar
-                progress={this.state.progress}
-                title={I18n.t('%{percent} complete', {
-                  percent: I18n.toPercentage(this.state.progress, {precision: 0})
-                })}
-              />
-            </div>
-          </Modal>
+          <ThemeEditorModal
+            showProgressModal={this.state.showProgressModal}
+            showSubAccountProgress={this.state.showSubAccountProgress}
+            activeSubAccountProgresses={this.state.activeSubAccountProgresses}
+            progress={this.state.progress} />
 
         </div>
       )

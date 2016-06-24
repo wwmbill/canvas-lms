@@ -99,6 +99,20 @@ describe LoginController do
       get 'new', authentication_provider: 'cas'
       expect(response).to redirect_to(controller.url_for(controller: 'login/cas', action: :new))
     end
+
+    it "redirects based on authentication_provider id param" do
+      ap2 = Account.default.authentication_providers.create!(auth_type: 'cas')
+      account_with_cas(account: Account.default)
+
+      get 'new', authentication_provider: ap2.id
+      expect(response).to redirect_to(controller.url_for(controller: 'login/cas', action: :new, id: ap2.id))
+    end
+
+    it "should pass pseudonym_session[unique_id] to redirect to populate username textbox" do
+      get 'new', "pseudonym_session" => {"unique_id"=>"test"}
+      expect(response).to redirect_to(
+        controller.url_for(controller: 'login/canvas', action: :new)+'?pseudonym_session%5Bunique_id%5D=test')
+    end
   end
 
   describe "#logout" do

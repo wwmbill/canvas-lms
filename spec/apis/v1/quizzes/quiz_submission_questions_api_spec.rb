@@ -141,7 +141,7 @@ describe Quizzes::QuizSubmissionQuestionsController, :type => :request do
 
 
   describe 'GET /quiz_submissions/:quiz_submission_id/questions [index]' do
-    before :all do
+    before :once do
       course_with_student(:active_all => true)
       @quiz = @course.quizzes.create!({
           title: 'test quiz',
@@ -164,9 +164,10 @@ describe Quizzes::QuizSubmissionQuestionsController, :type => :request do
     end
 
     describe "with data" do
-      before :all do
+      before :once do
         create_question_set
       end
+
       it 'should list all items' do
         Quizzes::QuizSubmission.any_instance.stubs(:quiz_questions).returns([@qq1,@qq2])
         json = api_index
@@ -185,6 +186,32 @@ describe Quizzes::QuizSubmissionQuestionsController, :type => :request do
         json = api_index({}, {quiz_submission_attempt: 2})
         expect(json['quiz_submission_questions'].map {|q| q['correct']}.all?).to be_truthy
       end
+
+      it "should return unauthorized when results are hidden in quiz settings" do
+        @quiz = @course.quizzes.create!({
+          title: 'test quiz',
+          hide_results: 'always'
+        })
+        @quiz_submission = @quiz.generate_submission(@student)
+        answers = create_question_set
+        @quiz.generate_quiz_data
+        @quiz.save!
+        @quiz_submission.complete!(answers)
+        api_index({}, {raw: true})
+        assert_status(401)
+      end
+    end
+
+    it "should be authorized when results are hidden in quiz settings and isn't complete" do
+      @quiz = @course.quizzes.create!({
+        title: 'test quiz',
+        hide_results: 'always'
+      })
+      @quiz_submission = @quiz.generate_submission(@student)
+
+      # Check if it still accepts a non-completed submission
+      api_index({}, {raw: true})
+      assert_status(200)
     end
 
     it "should deny student access when quiz is OQAAT" do

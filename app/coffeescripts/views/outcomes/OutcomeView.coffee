@@ -61,7 +61,10 @@ define [
     # overriding superclass
     getFormData: ->
       data = super()
-      delete data.calculation_int if data.calculation_method in ['highest', 'latest']
+      if data.calculation_method in ['highest', 'latest']
+        delete data.calculation_int
+      else
+        data.calculation_int = Number(data.calculation_int)
       data
 
     editRating: (e) =>
@@ -170,9 +173,14 @@ define [
         else # show
           data['points_possible'] ||= 0
           data['mastery_points'] ||= 0
+          can_move = !@readOnly() && ENV.PERMISSIONS?.manage_outcomes
+          can_edit = can_move && @model.isNative() && @model.get('can_edit')
+          can_remove = can_move && @model.outcomeLink.can_unlink
+
           @$el.html outcomeTemplate _.extend data,
-            readOnly: @readOnly(),
-            native: @model.isNative(),
+            can_move: can_move,
+            can_edit: can_edit,
+            can_remove: can_remove,
             setQuizMastery: @setQuizMastery,
             useForScoring: @useForScoring,
             isLargeRoster: ENV.IS_LARGE_ROSTER,

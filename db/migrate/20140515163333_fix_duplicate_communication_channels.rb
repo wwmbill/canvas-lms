@@ -4,8 +4,8 @@ class FixDuplicateCommunicationChannels < ActiveRecord::Migration
 
   def self.up
     CommunicationChannel.
-        group(CommunicationChannel.by_path_condition("path"), :path_type, :user_id).
-        select(["#{CommunicationChannel.by_path_condition("path")} AS path", :path_type, :user_id]).
+        group(CommunicationChannel.by_path_condition(CommunicationChannel.arel_table[:path]), :path_type, :user_id).
+        select([CommunicationChannel.by_path_condition(CommunicationChannel.arel_table[:path]).as('path'), :path_type, :user_id]).
         having("COUNT(*) > 1").find_each do |baddie|
       all = CommunicationChannel.where(user_id: baddie.user_id, path_type: baddie.path_type).
           by_path(baddie.path).order("CASE workflow_state WHEN 'active' THEN 0 WHEN 'unconfirmed' THEN 1 ELSE 2 END", :created_at).to_a
@@ -13,7 +13,7 @@ class FixDuplicateCommunicationChannels < ActiveRecord::Migration
       DelayedMessage.where(communication_channel_id: all).delete_all
       # it has a dependent: :destroy, but that does them one by one, which could take forever
       NotificationPolicy.where(communication_channel_id: all).delete_all
-      all.each(&:destroy!)
+      all.each(&:destroy_permanently!)
     end
 
     if connection.adapter_name == 'PostgreSQL'

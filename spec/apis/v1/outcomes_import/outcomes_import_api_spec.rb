@@ -162,6 +162,16 @@ describe "Outcomes Import API", type: :request do
         expect(available_json.any?{|j| j["title"] =~ /common core/i}).to be_truthy
       end
 
+      it "includes the NGSS standards" do
+        expect(available_json.any?{|j| j["title"] =~ /ngss/i}).to be_truthy
+      end
+
+      %w[Administrators Teachers Students].each do |group|
+        it "includes the ISTE standards for #{group}" do
+          expect(available_json.any?{|j| j["title"] == "NETS for #{group}"}).to be_truthy
+        end
+      end
+
       it "requires the user to have manage_global_outcomes permissions" do
         revoke_permission(@account_user, :manage_global_outcomes)
         available_json(expected_status: 401)
@@ -195,6 +205,16 @@ describe "Outcomes Import API", type: :request do
           A833C528;901A-11DF-A622-0C319DFF4B22
         ].each do |guid|
           expect(create_json(guid: guid)).to have_key("error")
+        end
+      end
+
+      it "accepts case-insensitive GUIDs" do
+        %w[
+          9426DCAE-734C-40D5-ABF6-FB748CD8BE65
+          9426dcae-734c-40d5-abf6-fb748cd8be65
+          9426DCAE-734C-40d5-abf6-fb748cd8be65
+        ].each do |guid|
+          expect(create_json(guid: guid)).not_to have_key("error")
         end
       end
 

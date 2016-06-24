@@ -44,6 +44,12 @@ describe GradebooksController do
   end
 
   describe "GET 'grade_summary'" do
+    it "redirects to the login page if the user is logged out" do
+      get 'grade_summary', :course_id => @course.id, :id => @student.id
+      expect(response).to redirect_to(login_url)
+      expect(flash[:warning]).to be_present
+    end
+
     it "redirects teacher to gradebook" do
       user_session(@teacher)
       get 'grade_summary', :course_id => @course.id, :id => nil
@@ -54,6 +60,13 @@ describe GradebooksController do
       user_session(@student)
       get 'grade_summary', :course_id => @course.id, :id => nil
       expect(response).to render_template('grade_summary')
+    end
+
+    it "does not allow access for inactive enrollment" do
+      user_session(@student)
+      @student_enrollment.deactivate
+      get 'grade_summary', :course_id => @course.id, :id => nil
+      assert_unauthorized
     end
 
     it "renders with specified user_id" do
@@ -189,20 +202,127 @@ describe GradebooksController do
       expect(assigns[:js_env][:submissions].sort_by { |s|
         s['assignment_id']
       }).to eq [
-        {'score' => nil, 'assignment_id' => a1.id},
-        {'score' => 5, 'assignment_id' => a2.id}
+        {score: 5, assignment_id: a2.id, excused: false, workflow_state: 'graded'}
       ]
     end
 
-    it "sorts assignments by due date (null last), then title" do
-      user_session(@teacher)
-      assignment1 = @course.assignments.create(:title => "Assignment 1")
-      assignment2 = @course.assignments.create(:title => "Assignment 2", :due_at => 3.days.from_now)
-      assignment3 = @course.assignments.create(:title => "Assignment 3", :due_at => 2.days.from_now)
+    it "includes necessary attributes on the submissions" do
+      user_session(@student)
+      assignment = @course.assignments.create!(points_possible: 10)
+      assignment.grade_student(@student, grade: 10)
+      get('grade_summary', course_id: @course.id, id: @student.id)
+      submission = assigns[:js_env][:submissions].first
+      expect(submission).to include :excused
+      expect(submission).to include :workflow_state
+    end
 
-      get 'grade_summary', :course_id => @course.id, :id => @student.id
-      assignment_ids = assigns[:presenter].assignments.select{|a| a.class == Assignment}.map(&:id)
-      expect(assignment_ids).to eq [assignment3, assignment2, assignment1].map(&:id)
+    context "assignment sorting" do
+      let!(:teacher_session) { user_session(@teacher) }
+      let!(:assignment1) { @course.assignments.create(title: "Banana", position: 2) }
+      let!(:assignment2) { @course.assignments.create(title: "Apple", due_at: 3.days.from_now, position: 3) }
+      let!(:assignment3) do
+        assignment_group = @course.assignment_groups.create!(position: 2)
+        @course.assignments.create!(
+          assignment_group: assignment_group, title: "Carrot", due_at: 2.days.from_now, position: 1
+        )
+      end
+      let(:assignment_ids) { assigns[:presenter].assignments.select{ |a| a.class == Assignment }.map(&:id) }
+
+      it "sorts assignments by due date (null last), then title if there is no saved order preference" do
+        get 'grade_summary', course_id: @course.id, id: @student.id
+        expect(assignment_ids).to eq [assignment3, assignment2, assignment1].map(&:id)
+      end
+
+      it "sort order of 'due_at' sorts by due date (null last), then title" do
+        @teacher.preferences[:course_grades_assignment_order] = { @course.id => :due_at }
+        @teacher.save!
+        get 'grade_summary', course_id: @course.id, id: @student.id
+        expect(assignment_ids).to eq [assignment3, assignment2, assignment1].map(&:id)
+      end
+
+      context "sort by: title" do
+        let!(:teacher_setup) do
+          @teacher.preferences[:course_grades_assignment_order] = { @course.id => :title }
+          @teacher.save!
+        end
+
+        it "sorts assignments by title" do
+          get 'grade_summary', course_id: @course.id, id: @student.id
+          expect(assignment_ids).to eq [assignment2, assignment1, assignment3].map(&:id)
+        end
+
+        it "ingores case" do
+          assignment1.title = 'banana'
+          assignment1.save!
+          get 'grade_summary', course_id: @course.id, id: @student.id
+          expect(assignment_ids).to eq [assignment2, assignment1, assignment3].map(&:id)
+        end
+      end
+
+      it "sort order of 'assignment_group' sorts by assignment group position, then assignment position" do
+        @teacher.preferences[:course_grades_assignment_order] = { @course.id => :assignment_group }
+        @teacher.save!
+        get 'grade_summary', course_id: @course.id, id: @student.id
+        expect(assignment_ids).to eq [assignment1, assignment2, assignment3].map(&:id)
+      end
+
+      context "sort by: module" do
+        let!(:first_context_module) { @course.context_modules.create! }
+        let!(:second_context_module) { @course.context_modules.create! }
+        let!(:assignment1_tag) do
+          a1_tag = assignment1.context_module_tags.new(context: @course, position: 1, tag_type: 'context_module')
+          a1_tag.context_module = second_context_module
+          a1_tag.save!
+        end
+
+        let!(:assignment2_tag) do
+          a2_tag = assignment2.context_module_tags.new(context: @course, position: 3, tag_type: 'context_module')
+          a2_tag.context_module = first_context_module
+          a2_tag.save!
+        end
+
+        let!(:assignment3_tag) do
+          a3_tag = assignment3.context_module_tags.new(context: @course, position: 2, tag_type: 'context_module')
+          a3_tag.context_module = first_context_module
+          a3_tag.save!
+        end
+
+        let!(:teacher_setup) do
+          @teacher.preferences[:course_grades_assignment_order] = { @course.id => :module }
+          @teacher.save!
+        end
+
+        it "sorts by module position, then context module tag position" do
+          get 'grade_summary', course_id: @course.id, id: @student.id
+          expect(assignment_ids).to eq [assignment3, assignment2, assignment1].map(&:id)
+        end
+
+        it "sorts by module position, then context module tag position, " \
+        "with those not belonging to a module sorted last" do
+          assignment3.context_module_tags.first.destroy!
+          get 'grade_summary', course_id: @course.id, id: @student.id
+          expect(assignment_ids).to eq [assignment2, assignment1, assignment3].map(&:id)
+        end
+      end
+    end
+
+    context "Multiple Grading Periods" do
+      before :once do
+        @course.root_account.enable_feature!(:multiple_grading_periods)
+      end
+
+      it "does not display totals if 'All Grading Periods' is selected" do
+        user_session(@student)
+        all_grading_periods_id = 0
+        get 'grade_summary', :course_id => @course.id, :id => @student.id, grading_period_id: all_grading_periods_id
+        expect(assigns[:exclude_total]).to eq true
+      end
+
+      it "displays totals if any grading period other than 'All Grading Periods' is selected" do
+        user_session(@student)
+        get 'grade_summary', :course_id => @course.id, :id => @student.id, grading_period_id: 1
+        expect(assigns[:exclude_total]).to eq false
+      end
     end
 
     context "with assignment due date overrides" do
@@ -372,6 +492,12 @@ describe GradebooksController do
         get "show", :course_id => @course.id
         expect(response).to render_template("screenreader")
       end
+
+      it "requests groups without wiki_page assignments" do
+        get "show", :course_id => @course.id
+        url = controller.js_env[:GRADEBOOK_OPTIONS][:assignment_groups_url]
+        expect(URI.unescape(url)).to include 'exclude_assignment_submission_types[]=wiki_page'
+      end
     end
 
     it "renders the unauthorized page without gradebook authorization" do
@@ -390,6 +516,15 @@ describe GradebooksController do
       # tell it to use gradebook 2
       get 'change_gradebook_version', :course_id => @course.id, :version => 2
       expect(response).to redirect_to(:action => 'show')
+    end
+  end
+
+  describe "POST 'submissions_zip_upload'" do
+    it "requires authentication" do
+      course
+      assignment_model
+      post 'submissions_zip_upload', :course_id => @course.id, :assignment_id => @assignment.id, :submissions_zip => 'dummy'
+      assert_unauthorized
     end
   end
 
@@ -469,8 +604,6 @@ describe GradebooksController do
 
     context "moderated grading" do
       before :once do
-        @course.root_account.allow_feature!(:moderated_grading)
-        @course.enable_feature!(:moderated_grading)
         @assignment = @course.assignments.create!(:title => "some assignment", :moderated_grading => true)
         @student = @course.enroll_student(User.create!(:name => "some user"), :enrollment_state => :active).user
       end
@@ -536,6 +669,9 @@ describe GradebooksController do
 
       it "creates a final provisional grade" do
         submission = @assignment.submit_homework(@student, :body => "hello")
+        other_teacher = teacher_in_course(:course => @course, :active_all => true).user
+        pg = submission.find_or_create_provisional_grade!(scorer: other_teacher) # create one so we can make a final
+
         post 'update_submission',
           :format => :json,
           :course_id => @course.id,
@@ -546,6 +682,7 @@ describe GradebooksController do
             :provisional => true,
             :final => true
           }
+        expect(response).to be_success
 
         # confirm "real" grades/comments were not written
         submission.reload
@@ -563,6 +700,7 @@ describe GradebooksController do
         # confirm the response JSON shows provisional information
         json = JSON.parse response.body
         expect(json[0]['submission']['score']).to eq 100
+        expect(json[0]['submission']['provisional_grade_id']).to eq pg.id
         expect(json[0]['submission']['grade_matches_current_submission']).to eq true
         expect(json[0]['submission']['submission_comments'].first['submission_comment']['comment']).to eq 'provisional!'
       end
@@ -619,6 +757,15 @@ describe GradebooksController do
       post 'speed_grader_settings', course_id: @course.id,
         enable_speedgrader_grade_by_question: "0"
       expect(@teacher.reload.preferences[:enable_speedgrader_grade_by_question]).not_to be_truthy
+    end
+  end
+
+  describe "POST 'save_assignment_order'" do
+    it "saves the sort order in the user's preferences" do
+      user_session(@teacher)
+      post 'save_assignment_order', course_id: @course.id, assignment_order: 'due_at'
+      saved_order = @teacher.preferences[:course_grades_assignment_order][@course.id]
+      expect(saved_order).to eq(:due_at)
     end
   end
 

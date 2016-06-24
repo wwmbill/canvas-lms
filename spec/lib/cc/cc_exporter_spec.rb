@@ -1,8 +1,11 @@
 require File.expand_path(File.dirname(__FILE__) + '/cc_spec_helper')
 
 require 'nokogiri'
+require 'webmock'
+WebMock.allow_net_connect!
 
 describe "Common Cartridge exporting" do
+
   it "should collect errors and finish running" do
     course = course_model
     user = user_model
@@ -24,6 +27,7 @@ describe "Common Cartridge exporting" do
   end
 
   context "creating .zip exports" do
+    include WebMock::API
 
     before do
       course_with_teacher
@@ -427,7 +431,7 @@ describe "Common Cartridge exporting" do
       stub_kaltura
       CanvasKaltura::ClientV3.any_instance.stubs(:startSession)
       CanvasKaltura::ClientV3.any_instance.stubs(:flavorAssetGetPlaylistUrl).returns('http://www.example.com/blah.flv')
-      stub_request(:get, 'http://www.example.com/blah.flv').to_return(body: Tempfile.new('blah.flv'), status: 200)
+      stub_request(:get, 'http://www.example.com/blah.flv').to_return(body: "", status: 200)
       CC::CCHelper.stubs(:media_object_info).returns({asset: {id: 1, status: '2'}, filename: 'blah.flv'})
       obj = @course.media_objects.create! media_id: '0_deadbeef'
       track = obj.media_tracks.create! kind: 'subtitles', locale: 'tlh', content: "Hab SoSlI' Quch!"
@@ -464,7 +468,7 @@ describe "Common Cartridge exporting" do
       expect(assignment_xml_doc.at_css('text').text).to eq '<a href="%24IMS-CC-FILEBASE%24/unfiled/test.txt">what?</a>'
       expect(assignment_xml_doc.at_css('text').attribute('texttype').value).to eq 'text/html'
       expect(assignment_xml_doc.at_css('gradable').text).to eq 'true'
-      expect(assignment_xml_doc.at_css('gradable').attribute('points_possible').value).to eq '11'
+      expect(assignment_xml_doc.at_css('gradable').attribute('points_possible').value).to eq '11.0'
       expect(assignment_xml_doc.css('submission_formats format').map{ |fmt| fmt.attribute('type').value }).to match_array %w(html file url)
 
       # validate presence of canvas extension node
@@ -569,6 +573,38 @@ describe "Common Cartridge exporting" do
 
         check_resource_node(@published, CC::CCHelper::LOR)
         check_resource_node(@unpublished, CC::CCHelper::LOR, false)
+      end
+
+      it "should always use relevant migration ids in anchor tags when exporting for ePub" do
+        cm1 = @course.context_modules.create!(name: "unlocked module")
+        cm1.publish
+        cm2 = @course.context_modules.create!({
+          name: "locked module",
+          prerequisites: [{:id=>cm1.id, :type=>"context_module", :name=>cm1.name}]
+        })
+        cm2.publish
+        cm1link = %{<a href="/courses/#{@course.id}/modules/#{cm1.id}">Mod 1</a>}
+        cm2link = %{<a href="/courses/#{@course.id}/modules/#{cm2.id}">Mod 2</a>}
+        assignment = @course.assignments.create!({
+          title: 'Assignment 1',
+          description: "go to module 1 at #{cm1link} and module 2 at #{cm2link}"
+        })
+        cm1.completion_requirements = [{:id=>assignment.id, :type=>"must_mark_done"}]
+        cm1.save!
+
+        student_in_course(active_all: true, user_name: "a student")
+        @ce.epub_export = EpubExport.create!({course: @course})
+        @ce.user = @student
+        @ce.save!
+
+        run_export
+
+        assignment_html = @manifest_doc.at_css("file[href$='#{mig_id(assignment)}/assignment-1.html']")
+        html_content = @zip_file.read(assignment_html["href"])
+
+        expect(html_content.match(/\$CANVAS_OBJECT_REFERENCE\$\/modules\/#{mig_id(cm1)}/)).not_to be_nil
+        expect(html_content.match(/\$CANVAS_OBJECT_REFERENCE\$\/modules\/#{mig_id(cm2)}/)).not_to be_nil
+
       end
     end
 

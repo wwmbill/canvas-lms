@@ -25,21 +25,7 @@ class Attachment < ActiveRecord::Base
     col = table ? "#{table}.display_name" : 'display_name'
     best_unicode_collation_key(col)
   end
-  attr_accessible :context, :folder, :filename, :display_name, :user, :locked, :position, :lock_at, :unlock_at, :uploaded_data, :hidden
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :context_id, :context_type, :size, :folder_id, :content_type,
-    :filename, :uuid, :display_name, :created_at, :updated_at,
-    :workflow_state, :user_id, :locked, :file_state, :deleted_at,
-    :position, :lock_at, :unlock_at, :last_lock_at, :last_unlock_at,
-    :could_be_locked, :root_attachment_id, :cloned_item_id,
-    :namespace, :media_entry_id, :encoding, :need_notify, :upload_error_message
-  ].freeze
-
-  EXPORTABLE_ASSOCIATIONS = [:context, :folder, :user, :media_object, :submission].freeze
-
-  include PolymorphicTypeOverride
-  override_polymorphic_types context_type: {'QuizStatistics' => 'Quizzes::QuizStatistics',
-                                            'QuizSubmission' => 'Quizzes::QuizSubmission'}
+  attr_accessible :context, :folder, :filename, :display_name, :user, :locked, :position, :lock_at, :unlock_at, :uploaded_data, :hidden, :viewed_at
 
   EXCLUDED_COPY_ATTRIBUTES = %w{id root_attachment_id uuid folder_id user_id
                                 filename namespace workflow_state}
@@ -53,7 +39,14 @@ class Attachment < ActiveRecord::Base
   # this is a gross hack to work around freaking SubmissionComment#attachments=
   attr_accessor :ok_for_submission_comment
 
-  belongs_to :context, :polymorphic => true
+  belongs_to :context, exhaustive: false, polymorphic:
+      [:account, :assessment_question, :assignment, :attachment,
+       :content_export, :content_migration, :course, :eportfolio, :epub_export,
+       :gradebook_upload, :group, :submission,
+       { context_folder: 'Folder', context_sis_batch: 'SisBatch',
+         context_user: 'User', quiz: 'Quizzes::Quiz',
+         quiz_statistics: 'Quizzes::QuizStatistics',
+         quiz_submission: 'Quizzes::QuizSubmission' }]
   belongs_to :cloned_item
   belongs_to :folder
   belongs_to :user
@@ -64,7 +57,7 @@ class Attachment < ActiveRecord::Base
   belongs_to :root_attachment, :class_name => 'Attachment'
   belongs_to :replacement_attachment, :class_name => 'Attachment'
   has_one :sis_batch
-  has_one :thumbnail, :foreign_key => "parent_id", :conditions => {:thumbnail => "thumb"}
+  has_one :thumbnail, -> { where(thumbnail: 'thumb') }, foreign_key: "parent_id"
   has_many :thumbnails, :foreign_key => "parent_id"
   has_many :children, foreign_key: :root_attachment_id, class_name: 'Attachment'
   has_one :crocodoc_document
@@ -185,20 +178,9 @@ class Attachment < ActiveRecord::Base
 
   def touch_context_if_appropriate
     unless context_type == 'ConversationMessage'
-      connection.after_transaction_commit { touch_context }
+      self.class.connection.after_transaction_commit { touch_context }
     end
   end
-
-  def before_attachment_saved
-    run_before_attachment_saved
-  end
-
-  def after_attachment_saved
-    run_after_attachment_saved
-  end
-
-  before_attachment_saved :run_before_attachment_saved
-  after_attachment_saved :run_after_attachment_saved
 
   def run_before_attachment_saved
     @after_attachment_saved_workflow_state = self.workflow_state
@@ -270,7 +252,11 @@ class Attachment < ActiveRecord::Base
     existing ||= self.cloned_item_id ? context.attachments.where(cloned_item_id: self.cloned_item_id).first : nil
     dup ||= Attachment.new
     dup = existing if existing && options[:overwrite]
-    dup.assign_attributes(self.attributes.except(*EXCLUDED_COPY_ATTRIBUTES), :without_protection => true)
+
+    excluded_atts = EXCLUDED_COPY_ATTRIBUTES
+    excluded_atts += ["locked", "hidden"] if dup == existing
+    dup.assign_attributes(self.attributes.except(*excluded_atts), :without_protection => true)
+
     dup.write_attribute(:filename, self.filename)
     # avoid cycles (a -> b -> a) and self-references (a -> a) in root_attachment_id pointers
     if dup.new_record? || ![self.id, self.root_attachment_id].include?(dup.id)
@@ -321,6 +307,7 @@ class Attachment < ActiveRecord::Base
   attr_accessor :recently_created
 
   validates_presence_of :context_id, :context_type, :workflow_state
+  validates_length_of :content_type, :maximum => maximum_string_length, :allow_blank => true
 
   # related_attachments: our root attachment, anyone who shares our root attachment,
   # and anyone who calls us a root attachment
@@ -503,7 +490,7 @@ class Attachment < ActiveRecord::Base
       end
       save!
       # normally this would be called by attachment_fu after it had uploaded the file to S3.
-      after_attachment_saved
+      run_after_attachment_saved
     end
   end
 
@@ -555,7 +542,7 @@ class Attachment < ActiveRecord::Base
 
     res[:id] = id
     res[:upload_params].merge!({
-       'Filename' => '',
+       'Filename' => filename,
        'key' => sanitized_filename,
        'acl' => 'private',
        'Policy' => policy_encoded,
@@ -599,11 +586,21 @@ class Attachment < ActiveRecord::Base
     context = context.quota_context if context.respond_to?(:quota_context) && context.quota_context
     if context
       Shackles.activate(:slave) do
-        quota = Setting.get('context_default_quota', 50.megabytes.to_s).to_i
-        quota = context.quota if (context.respond_to?("quota") && context.quota)
-        min = self.minimum_size_for_quota
-        # translated to ruby this is [size, min].max || 0
-        quota_used = context.attachments.active.where(root_attachment_id: nil).sum("COALESCE(CASE when size < #{min} THEN #{min} ELSE size END, 0)").to_i
+        context.shard.activate do
+          quota = Setting.get('context_default_quota', 50.megabytes.to_s).to_i
+          quota = context.quota if (context.respond_to?("quota") && context.quota)
+
+          attachment_scope = context.attachments.active.where(root_attachment_id: nil)
+
+          if context.is_a?(User)
+            excluded_attachment_ids = context.attachments.joins(:attachment_associations).where("attachment_associations.context_type = ?", "Submission").pluck(:id)
+            attachment_scope = attachment_scope.where("id NOT IN (?)", excluded_attachment_ids) if excluded_attachment_ids.any?
+          end
+
+          min = self.minimum_size_for_quota
+          # translated to ruby this is [size, min].max || 0
+          quota_used = attachment_scope.sum("COALESCE(CASE when size < #{min} THEN #{min} ELSE size END, 0)").to_i
+        end
       end
     end
     {:quota => quota, :quota_used => quota_used}
@@ -692,6 +689,11 @@ class Attachment < ActiveRecord::Base
     encoding.blank? ? content_type : "#{content_type}; charset=#{encoding}"
   end
 
+  def content_type_with_text_match
+    # treats all text/X files as text/plain (except text/html)
+    (content_type.to_s.match(/^text\/.*/) && content_type.to_s != "text/html") ? "text/plain" : content_type
+  end
+
   # Returns an IO-like object containing the contents of the attachment file.
   # Any resources are guaranteed to be cleaned up when the object is garbage
   # collected (for instance, using the Tempfile class). Calling close on the
@@ -758,18 +760,6 @@ class Attachment < ActiveRecord::Base
     end
   end
 
-  alias_method :original_sanitize_filename, :sanitize_filename
-  def sanitize_filename(filename)
-    if self.root_attachment && self.root_attachment.filename
-      filename = self.root_attachment.filename
-    else
-      filename = Attachment.truncate_filename(filename, 255) do |component, len|
-        CanvasTextHelper.cgi_escape_truncate(component, len)
-      end
-    end
-    filename
-  end
-
   def save_without_broadcasting
     begin
       @skip_broadcasts = true
@@ -809,10 +799,12 @@ class Attachment < ActiveRecord::Base
     discard_older_than = Setting.get("attachment_notify_discard_older_than_hours", "120").to_i.hours.ago
 
     while true
-      file_batches = Attachment.connection.select_rows(sanitize_sql([<<-SQL, quiet_period]))
-        SELECT COUNT(attachments.id), MIN(attachments.id), MAX(updated_at), context_id, context_type
-        FROM attachments WHERE need_notify GROUP BY context_id, context_type HAVING MAX(updated_at) < ? LIMIT 500
-      SQL
+      file_batches = Attachment.
+          where("need_notify").
+          group(:context_id, :context_type).
+          having("MAX(updated_at)<?", quiet_period).
+          limit(500).
+          pluck("COUNT(attachments.id), MIN(attachments.id), MAX(updated_at), context_id, context_type")
       break if file_batches.empty?
       file_batches.each do |count, attachment_id, last_updated_at, context_id, context_type|
         # clear the need_notify flag for this batch
@@ -824,8 +816,7 @@ class Attachment < ActiveRecord::Base
 
         # now generate the notification
         record = Attachment.find(attachment_id)
-        notification = BroadcastPolicy.notification_finder.by_name(count.to_i > 1 ? 'New Files Added' : 'New File Added')
-
+        next if record.context.is_a?(Course) && (!record.context.available? || record.context.concluded?)
         if record.context.is_a?(Course) && (record.folder.locked? || record.context.tab_hidden?(Course::TAB_FILES))
           # only notify course students if they are able to access it
           to_list = record.context.participating_admins - [record.user]
@@ -835,6 +826,7 @@ class Attachment < ActiveRecord::Base
         recipient_keys = (to_list || []).compact.map(&:asset_string)
         next if recipient_keys.empty?
 
+        notification = BroadcastPolicy.notification_finder.by_name(count.to_i > 1 ? 'New Files Added' : 'New File Added')
         asset_context = record.context
         data = { :count => count }
         DelayedNotification.send_later_if_production_enqueue_args(
@@ -959,7 +951,6 @@ class Attachment < ActiveRecord::Base
       "image/pjpeg" => "image",
       "image/png" => "image",
       "image/gif" => "image",
-      "image/x-psd" => "image",
       "application/x-rar" => "zip",
       "application/x-rar-compressed" => "zip",
       "application/x-zip" => "zip",
@@ -986,19 +977,31 @@ class Attachment < ActiveRecord::Base
     }[content_type] || "file"
   end
 
-  set_policy do
-    given { |user, session| self.context.grants_right?(user, session, :manage_files) } #admins.include? user }
-    can :read and can :update and can :delete and can :create and can :download
+  def associated_with_submission?
+    @associated_with_submission ||= self.attachment_associations.where(context_type: 'Submission').exists?
+  end
 
-    given { |user| self.public? }
+  set_policy do
+    given { |user|
+      self.context.grants_right?(user, :manage_files) &&
+      !self.associated_with_submission?
+    }
+    can :delete
+
+    given { |user, session| self.context.grants_right?(user, session, :manage_files) } #admins.include? user }
+    can :read and can :update and can :create and can :download and can :read_as_admin
+
+    given { self.public? }
     can :read and can :download
 
     given { |user, session| self.context.grants_right?(user, session, :read) } #students.include? user }
     can :read
 
+    given { |user, session| self.context.grants_right?(user, session, :read_as_admin) }
+    can :read_as_admin
+
     given { |user, session|
-      self.context.grants_right?(user, session, :read) &&
-      (self.context.grants_right?(user, session, :read_as_admin) || !self.locked_for?(user))
+      self.context.grants_right?(user, session, :read) && !self.locked_for?(user, :check_policies => true)
     }
     can :download
 
@@ -1019,7 +1022,7 @@ class Attachment < ActiveRecord::Base
         (u = User.where(id: session['file_access_user_id']).first) &&
         (self.context.grants_right?(u, session, :read) ||
           (self.context.respond_to?(:is_public_to_auth_users?) && self.context.is_public_to_auth_users?)) &&
-        (self.context.grants_right?(u, session, :manage_files) || !self.locked_for?(u)) &&
+        !self.locked_for?(u, :check_policies => true) &&
         session['file_access_expiration'] && session['file_access_expiration'].to_i > Time.now.to_i
     }
     can :download
@@ -1035,19 +1038,28 @@ class Attachment < ActiveRecord::Base
   # submission attachments
   attr_writer :skip_submission_attachment_lock_checks
 
+  # prevent an access attempt shortly before unlock_at from caching permissions beyond that time
+  def touch_on_unlock
+    Shackles.activate(:master) do
+      send_later_enqueue_args(:touch, { :run_at => unlock_at,
+                                        :singleton => "touch_on_unlock_attachment_#{global_id}" })
+    end
+  end
+
   def locked_for?(user, opts={})
     return false if @skip_submission_attachment_lock_checks
-    return false if opts[:check_policies] && self.grants_right?(user, :update)
+    return false if opts[:check_policies] && self.grants_right?(user, :read_as_admin)
     return {:asset_string => self.asset_string, :manually_locked => true} if self.locked || Folder.is_locked?(self.folder_id)
     Rails.cache.fetch(locked_cache_key(user), :expires_in => 1.minute) do
       locked = false
       if (self.unlock_at && Time.now < self.unlock_at)
+        touch_on_unlock if Time.now + 1.hour >= self.unlock_at
         locked = {:asset_string => self.asset_string, :unlock_at => self.unlock_at}
       elsif (self.lock_at && Time.now > self.lock_at)
         locked = {:asset_string => self.asset_string, :lock_at => self.lock_at}
       elsif self.could_be_locked && item = locked_by_module_item?(user, opts[:deep_check_if_needed])
         locked = {:asset_string => self.asset_string, :context_module => item.context_module.attributes}
-        locked[:unlock_at] = locked[:context_module]["unlock_at"] if locked[:context_module]["unlock_at"]
+        locked[:unlock_at] = locked[:context_module]["unlock_at"] if locked[:context_module]["unlock_at"] && locked[:context_module]["unlock_at"] > Time.now.utc
       end
       locked
     end
@@ -1142,7 +1154,7 @@ class Attachment < ActiveRecord::Base
     where(condition_sql)
   }
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   # file_state is like workflow_state, which was already taken
   # possible values are: available, deleted
   def destroy
@@ -1155,6 +1167,7 @@ class Attachment < ActiveRecord::Base
     # if the attachment being deleted belongs to a user and the uuid (hash of file) matches the avatar_image_url
     # then clear the avatar_image_url value.
     self.context.clear_avatar_image_url_with_uuid(self.uuid) if self.context_type == 'User' && self.uuid.present?
+    true
   end
 
   def restore
@@ -1176,7 +1189,7 @@ class Attachment < ActiveRecord::Base
   end
 
   def canvadocable?
-    Canvadocs.enabled? && Canvadoc.mime_types.include?(content_type)
+    Canvadocs.enabled? && Canvadoc.mime_types.include?(content_type_with_text_match)
   end
 
   def self.submit_to_canvadocs(ids)
@@ -1207,9 +1220,10 @@ class Attachment < ActiveRecord::Base
     # ... or crocodoc (this will go away soon)
     return if Attachment.skip_3rd_party_submits?
 
-    submit_to_crocodoc_instead = opts[:wants_annotation] &&
-                                 crocodocable? &&
-                                 !Canvadocs.annotations_supported?
+    submit_to_crocodoc_instead = opts[:force_crocodoc] ||
+                                 (opts[:wants_annotation] &&
+                                  crocodocable? &&
+                                  !Canvadocs.annotations_supported?)
     if submit_to_crocodoc_instead
       # get crocodoc off the canvadocs strand
       # (maybe :wants_annotation was a dumb idea)
@@ -1463,12 +1477,13 @@ class Attachment < ActiveRecord::Base
   end
 
   def preview_params(user, type, crocodoc_ids = nil)
-    blob = {
+    h = {
       user_id: user.try(:global_id),
       attachment_id: id,
-      type: type,
-      crocodoc_ids: crocodoc_ids
-    }.to_json
+      type: type
+    }
+    h.merge!(crocodoc_ids: crocodoc_ids) if crocodoc_ids.present?
+    blob = h.to_json
     hmac = Canvas::Security.hmac_sha1(blob)
     "blob=#{URI.encode blob}&hmac=#{URI.encode hmac}"
   end
@@ -1481,7 +1496,6 @@ class Attachment < ActiveRecord::Base
   def set_publish_state_for_usage_rights
     if self.context &&
        self.context.respond_to?(:feature_enabled?) &&
-       self.context.feature_enabled?(:better_file_browsing) &&
        self.context.feature_enabled?(:usage_rights_required)
       self.locked = self.usage_rights.nil?
     end

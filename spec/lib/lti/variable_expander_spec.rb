@@ -46,6 +46,7 @@ module Lti
       m.stubs(:request).returns(request_mock)
       m.stubs(:logged_in_user).returns(user)
       m.stubs(:named_context_url).returns('url')
+      m.stubs(:polymorphic_url).returns('url')
       view_context_mock = mock('view_context')
       view_context_mock.stubs(:stylesheet_path)
                        .returns(URI.parse(request_mock.url).merge(m.css_url_for(:common)).to_s)
@@ -208,6 +209,14 @@ module Lti
       context 'context is a course' do
         subject { described_class.new(root_account, course, controller, current_user: user) }
 
+        it 'has substitution for $Canvas.api.membershipServiceUrl' do
+          exp_hash = { test: '$Canvas.api.membershipServiceUrl' }
+          course.stubs(:id).returns('1')
+          controller.stubs(:course_membership_service_url).returns("/api/lti/courses/#{course.id}/membership_service")
+          subject.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq "/api/lti/courses/1/membership_service"
+        end
+
         it 'has substitution for $Canvas.course.id' do
           course.stubs(:id).returns(123)
           exp_hash = {test: '$Canvas.course.id'}
@@ -353,11 +362,27 @@ module Lti
           expect(exp_hash[:test]).to eq 'Buy as many ducks as you can'
         end
 
-        it 'has substitution for $Canvas.assignment.pointsPossible' do
-          assignment.stubs(:points_possible).returns(10)
-          exp_hash = {test: '$Canvas.assignment.pointsPossible'}
-          subject.expand_variables!(exp_hash)
-          expect(exp_hash[:test]).to eq 10
+        describe "$Canvas.assignment.pointsPossible" do
+          it 'has substitution for $Canvas.assignment.pointsPossible' do
+            assignment.stubs(:points_possible).returns(10.0)
+            exp_hash = {test: '$Canvas.assignment.pointsPossible'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq 10
+          end
+
+          it 'does not round if not whole' do
+            assignment.stubs(:points_possible).returns(9.5)
+            exp_hash = {test: '$Canvas.assignment.pointsPossible'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test].to_s).to eq "9.5"
+          end
+
+          it 'rounds if whole' do
+            assignment.stubs(:points_possible).returns(9.0)
+            exp_hash = {test: '$Canvas.assignment.pointsPossible'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test].to_s).to eq "9"
+          end
         end
 
         it 'has substitution for $Canvas.assignment.unlockAt' do
@@ -380,27 +405,51 @@ module Lti
           subject.expand_variables!(exp_hash)
           expect(exp_hash[:test]).to eq right_now.to_s
         end
+        context 'iso8601' do
+          it 'has substitution for $Canvas.assignment.unlockAt.iso8601' do
+            assignment.stubs(:unlock_at).returns(right_now)
+            exp_hash = {test: '$Canvas.assignment.unlockAt.iso8601'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq right_now.utc.iso8601.to_s
+          end
 
-        it 'has substitution for $Canvas.assignment.unlockAt.iso8601' do
-          assignment.stubs(:unlock_at).returns(right_now)
-          exp_hash = {test: '$Canvas.assignment.unlockAt.iso8601'}
-          subject.expand_variables!(exp_hash)
-          expect(exp_hash[:test]).to eq right_now.utc.iso8601.to_s
+          it 'has substitution for $Canvas.assignment.lockAt.iso8601' do
+            assignment.stubs(:lock_at).returns(right_now)
+            exp_hash = {test: '$Canvas.assignment.lockAt.iso8601'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq right_now.utc.iso8601.to_s
+          end
+
+          it 'has substitution for $Canvas.assignment.dueAt.iso8601' do
+            assignment.stubs(:due_at).returns(right_now)
+            exp_hash = {test: '$Canvas.assignment.dueAt.iso8601'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq right_now.utc.iso8601.to_s
+          end
+
+          it 'handles a nil unlock_at' do
+            assignment.stubs(:unlock_at).returns(nil)
+            exp_hash = {test: '$Canvas.assignment.unlockAt.iso8601'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq "$Canvas.assignment.unlockAt.iso8601"
+          end
+
+          it 'handles a nil lock_at' do
+            assignment.stubs(:lock_at).returns(nil)
+            exp_hash = {test: '$Canvas.assignment.lockAt.iso8601'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq "$Canvas.assignment.lockAt.iso8601"
+          end
+
+          it 'handles a nil due_at' do
+            assignment.stubs(:lock_at).returns(nil)
+            exp_hash = {test: '$Canvas.assignment.dueAt.iso8601'}
+            subject.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq "$Canvas.assignment.dueAt.iso8601"
+          end
+
         end
 
-        it 'has substitution for $Canvas.assignment.lockAt.iso8601' do
-          assignment.stubs(:lock_at).returns(right_now)
-          exp_hash = {test: '$Canvas.assignment.lockAt.iso8601'}
-          subject.expand_variables!(exp_hash)
-          expect(exp_hash[:test]).to eq right_now.utc.iso8601.to_s
-        end
-
-        it 'has substitution for $Canvas.assignment.dueAt.iso8601' do
-          assignment.stubs(:due_at).returns(right_now)
-          exp_hash = {test: '$Canvas.assignment.dueAt.iso8601'}
-          subject.expand_variables!(exp_hash)
-          expect(exp_hash[:test]).to eq right_now.utc.iso8601.to_s
-        end
 
       end
 
@@ -428,6 +477,7 @@ module Lti
         end
 
         it 'has substitution for $Person.email.primary' do
+          user.save
           user.email = 'someone@somewhere'
           exp_hash = {test: '$Person.email.primary'}
           subject.expand_variables!(exp_hash)
@@ -460,6 +510,13 @@ module Lti
           exp_hash = {test: '$Canvas.xuser.allRoles'}
           subject.expand_variables!(exp_hash)
           expect(exp_hash[:test]).to eq 'Admin,User'
+        end
+
+        it 'has substitution for $Canvas.user.globalId' do
+          user.stubs(:global_id).returns(456)
+          exp_hash = {test: '$Canvas.user.globalId'}
+          subject.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq 456
         end
 
         it 'has substitution for $Membership.role' do

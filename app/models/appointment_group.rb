@@ -21,22 +21,14 @@ class AppointmentGroup < ActiveRecord::Base
   include TextHelper
   include HtmlTextHelper
 
-  has_many :appointments, opts = { class_name: 'CalendarEvent', as: :context, order: :start_at, preload: :child_events, conditions: "calendar_events.workflow_state <> 'deleted'", inverse_of: :context }
+  has_many :appointments, -> { order(:start_at).preload(:child_events).where("calendar_events.workflow_state <> 'deleted'") }, opts = { class_name: 'CalendarEvent', as: :context, inverse_of: :context }
   # has_many :through on the same table does not alias columns in condition
   # strings, just hashes. we create this helper association to ensure
   # appointments_participants conditions have the correct table alias
-  has_many :_appointments, opts.merge(:conditions => opts[:conditions].gsub(/calendar_events\./, '_appointments_appointments_participants_join.'))
-  has_many :appointments_participants, :through => :_appointments, :source => :child_events, :conditions => "calendar_events.workflow_state <> 'deleted'", :order => :start_at
+  has_many :_appointments, -> { order(:start_at).preload(:child_events).where("_appointments_appointments_participants_join.workflow_state <> 'deleted'") }, opts
+  has_many :appointments_participants, -> { where("calendar_events.workflow_state <> 'deleted'").order(:start_at) }, through: :_appointments, source: :child_events
   has_many :appointment_group_contexts
-  has_many :appointment_group_sub_contexts, preload: :sub_context
-
-  EXPORTABLE_ATTRIBUTES = [
-    :id, :title, :description, :location_name, :location_address, :context_id, :context_type, :context_code, :sub_context_id, :sub_context_type,
-    :sub_context_code, :workflow_state, :created_at, :updated_at, :start_at, :end_at, :participants_per_appointment, :max_appointments_per_participant,
-    :min_appointments_per_participant, :participant_visibility
-  ]
-
-  EXPORTABLE_ASSOCIATIONS = [:appointments, :appointment_participants, :appointment_group_contexts, :appointment_group_sub_contexts]
+  has_many :appointment_group_sub_contexts, -> { preload(:sub_context) }
 
   def context
     appointment_group_contexts.first.context
@@ -47,7 +39,7 @@ class AppointmentGroup < ActiveRecord::Base
   end
 
   def active_contexts
-    contexts.reject { |context| context.workflow_state == 'deleted' }
+    contexts.reject { |context| context.workflow_state == 'deleted' || context.concluded? }
   end
 
   def sub_contexts
@@ -239,7 +231,7 @@ class AppointmentGroup < ActiveRecord::Base
 
     given { |user|
       next false if deleted?
-      next false unless active_contexts.all? { |c| c.grants_right? user, :manage_calendar }
+      next false unless active_contexts.any? { |c| c.grants_right? user, :manage_calendar }
       if appointment_group_sub_contexts.present? && appointment_group_sub_contexts.first.sub_context_type == 'CourseSection'
         sub_context_ids = appointment_group_sub_contexts.map(&:sub_context_id)
         user_visible_section_ids = contexts.map { |c|
@@ -358,7 +350,7 @@ class AppointmentGroup < ActiveRecord::Base
           group_categories = sub_contexts.find_all{|sc| sc.instance_of? GroupCategory }
           raise %Q{inconsistent appointment group: #{self.id} #{group_categories}} if group_categories.length > 1
           group_category_id = group_categories.first.id
-          user.groups.detect{ |g| g.group_category_id == group_category_id }
+          user.current_groups.detect{ |g| g.group_category_id == group_category_id }
         end
       participant if participant && eligible_participant?(participant)
     end
@@ -451,7 +443,7 @@ class AppointmentGroup < ActiveRecord::Base
     state :deleted
   end
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   def destroy
     transaction do
       self.workflow_state = 'deleted'
@@ -472,7 +464,7 @@ class AppointmentGroup < ActiveRecord::Base
 
   def context_codes_for_user(user)
     @context_codes_for_user ||= {}
-    @context_codes_for_user[user.global_id] if @context_codes_for_user.has_key?(user.global_id)
+    return @context_codes_for_user[user.global_id] if @context_codes_for_user.has_key?(user.global_id)
     @context_codes_for_user[user.global_id] = begin
       manageable_codes = user.manageable_appointment_context_codes
       user_codes = user.appointment_context_codes[:primary] |

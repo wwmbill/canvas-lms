@@ -1,8 +1,9 @@
-require File.expand_path(File.dirname(__FILE__) + '/../helpers/quizzes_common')
+require_relative '../common'
+require_relative '../helpers/quizzes_common'
 
 describe 'quizzes question creation' do
-
-  include_context 'in-process server selenium tests'
+  include_context "in-process server selenium tests"
+  include QuizzesCommon
 
   context 'when creating a new question' do
 
@@ -129,7 +130,8 @@ describe 'quizzes question creation' do
       submit_form(question)
       wait_for_ajax_requests
 
-      f('#show_question_details').click
+      close_regrade_tooltip if f('.btn.usher-close')
+      move_to_click('label[for=show_question_details]')
       finished_question = f("#question_#{quiz.quiz_questions[0].id}")
       expect(finished_question).to be_displayed
       expect(finished_question.find_elements(:css, '.answer.correct_answer').length).to eq 2
@@ -273,13 +275,15 @@ describe 'quizzes question creation' do
       type_in_tiny '.question_form:visible textarea.question_content',
         'If [x] + [y] is a whole number, then this is a formula question.'
 
-      fj('button.recompute_variables').click
-      val = fj('.variables.value').to_i
+      # get focus out of tinymce to allow change event to propogate
+      f(".question_header").click
+      f('button.recompute_variables').click
+      val = f('.variables.value').to_i
       expect(val <= 10 && val >= 0)
-      fj('button.recompute_variables').click
-      keep_trying_until { expect(fj('.variables.value').to_i != val) }
+      f('button.recompute_variables').click
+      keep_trying_until { expect(f('.variables.value').to_i != val) }
       fj('.supercalc:visible').send_keys('x + y')
-      fj('button.save_formula_button').click
+      f('button.save_formula_button').click
       # normally it's capped at 200 (to keep the yaml from getting crazy big)...
       # since selenium tests take forever, let's make the limit much lower
       driver.execute_script('ENV.quiz_max_combination_count = 10')
@@ -294,6 +298,20 @@ describe 'quizzes question creation' do
 
       quiz.reload
       expect(f("#question_#{quiz.quiz_questions[0].id}")).to be_displayed
+    end
+
+    it "should change example value on clicking the 'recompute' button when creating formula questions", priority: "2", test_id: 324919 do
+      skip('Fails with webpack enabled')
+      start_quiz_question
+      click_option('.question_form:visible .question_type', 'Formula Question')
+      wait_for_ajaximations
+      type_in_tiny '.question:visible textarea.question_content', '5 + [x] = 10'
+      wait_for_ajaximations
+      replace_content(f('input[type =text][name =min]'), '4')
+      replace_content(f('input[type =text][name =max]'), '8')
+      previous_example_value = f('.value').text
+      f('.recompute_variables').click
+      expect(previous_example_value).not_to eq(f('.value').text)
     end
 
     # Essay Question
@@ -354,19 +372,32 @@ describe 'quizzes question creation' do
       expect(question).to be_displayed
       assert_error_box(".question_form:visible input[name='question_points']")
     end
+
+    it "should show an error when the quiz question exceeds character limit", priority: "2", test_id: 140672 do
+      start_quiz_question
+      chars = [*('a'..'z')]
+      value = (0..16385).map{chars.sample}.join
+      type_in_tiny '.question:visible textarea.question_content', value
+      wait_for_ajaximations
+      f('.submit_button').click
+      wait_for_ajaximations
+      error_boxes = driver.execute_script("return $('.errorBox').filter('[id!=error_box_template]').toArray();")
+      visboxes, _hidboxes = error_boxes.partition { |eb| eb.displayed? }
+      expect(visboxes.first.text).to eq "question text is too long, max length is 16384 characters"
+    end
   end
 
   context 'when a quiz has more than 25 questions' do
 
     def quiz_questions_creation
-      @q = @course.quizzes.create!(title: 'new quiz')
+      @quiz = @course.quizzes.create!(title: 'new quiz')
       26.times do
-        @q.quiz_questions.create!(question_data: {name: 'Quiz Questions', question_type: 'essay_question', question_text: 'qq_1', answers: [], points_possible: 1})
+        @quiz.quiz_questions.create!(question_data: {name: 'Quiz Questions', question_type: 'essay_question', question_text: 'qq_1', answers: [], points_possible: 1})
       end
-      @q.generate_quiz_data
-      @q.workflow_state = 'available'
-      @q.save
-      @q.reload
+      @quiz.generate_quiz_data
+      @quiz.workflow_state = 'available'
+      @quiz.save
+      @quiz.reload
     end
 
     before(:each) do
@@ -375,7 +406,7 @@ describe 'quizzes question creation' do
     end
 
     it 'edits quiz questions', priority: "1", test_id: 140578 do
-      get "/courses/#{@course.id}/quizzes/#{@q.id}/edit"
+      open_quiz_edit_form
       click_questions_tab
       driver.execute_script("$('.display_question').first().addClass('hover').addClass('active')")
       fj('.edit_teaser_link').click
@@ -425,4 +456,3 @@ describe 'quizzes question creation' do
     end
   end
 end
-

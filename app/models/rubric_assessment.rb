@@ -28,15 +28,12 @@ class RubricAssessment < ActiveRecord::Base
   belongs_to :rubric_association
   belongs_to :user
   belongs_to :assessor, :class_name => 'User'
-  belongs_to :artifact, :polymorphic => true, :touch => true
-  validates_inclusion_of :artifact_type, :allow_nil => true, :in => ['Submission', 'Assignment', 'ModeratedGrading::ProvisionalGrade']
+  belongs_to :artifact, touch: true,
+             polymorphic: [:submission, :assignment, { provisional_grade: 'ModeratedGrading::ProvisionalGrade' }]
   has_many :assessment_requests, :dependent => :destroy
-  serialize_utf8_safe :data
+  serialize :data
 
   simply_versioned
-
-  EXPORTABLE_ATTRIBUTES = [:id, :user_id, :rubric_id, :rubric_association_id, :score, :data, :created_at, :updated_at, :artifact_id, :artifact_type, :assessment_type, :assessor_id, :artifact_attempt]
-  EXPORTABLE_ASSOCIATIONS = [:rubric, :rubric_association, :user, :assessor, :artifact, :assessment_requests]
 
   validates_presence_of :assessment_type, :rubric_id, :artifact_id, :artifact_type, :assessor_id
 
@@ -149,6 +146,10 @@ class RubricAssessment < ActiveRecord::Base
     self.artifact_type == 'Submission' ? self.artifact.attempt : nil
   end
 
+  def set_graded_anonymously
+    @graded_anonymously_set = true
+  end
+
   def update_artifact
     if self.artifact_type == 'Submission' && self.artifact
       Submission.where(:id => self.artifact).update_all(:has_rubric_assessment => true)
@@ -157,6 +158,7 @@ class RubricAssessment < ActiveRecord::Base
           # TODO: this should go through assignment.grade_student to
           # handle group assignments.
           self.artifact.workflow_state = 'graded'
+          self.artifact.graded_anonymously = true if @graded_anonymously_set
           self.artifact.update_attributes(:score => self.score, :graded_at => Time.now, :grade_matches_current_submission => true, :grader => self.assessor)
         end
       end
@@ -236,7 +238,7 @@ class RubricAssessment < ActiveRecord::Base
   end
 
   def related_group_submissions_and_assessments
-    if self.rubric_association && self.rubric_association.association_object.is_a?(Assignment) && !self.rubric_association.association_object.grade_group_students_individually
+    if self.rubric_association && self.rubric_association.association_object.is_a?(Assignment) && !self.artifact.is_a?(ModeratedGrading::ProvisionalGrade) && !self.rubric_association.association_object.grade_group_students_individually
       students = self.rubric_association.association_object.group_students(self.user).last
       submissions = students.map do |student|
         submission = self.rubric_association.association_object.find_asset_for_assessment(self.rubric_association, student).first

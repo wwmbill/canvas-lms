@@ -52,7 +52,7 @@ class AccountAuthorizationConfig < ActiveRecord::Base
     case type_name
     when 'cas', 'ldap', 'saml'
       const_get(type_name.upcase)
-    when 'facebook', 'google', 'twitter'
+    when 'clever', 'facebook', 'google', 'microsoft', 'twitter'
       const_get(type_name.classify)
     when 'canvas'
       Canvas
@@ -88,7 +88,7 @@ class AccountAuthorizationConfig < ActiveRecord::Base
   has_many :pseudonyms, foreign_key: :authentication_provider_id
   acts_as_list scope: { account: self, workflow_state: [nil, 'active'] }
 
-  VALID_AUTH_TYPES = %w[canvas cas facebook github google ldap linkedin openid_connect saml twitter].freeze
+  VALID_AUTH_TYPES = %w[canvas cas clever facebook github google ldap linkedin microsoft openid_connect saml twitter].freeze
   validates_inclusion_of :auth_type, in: VALID_AUTH_TYPES, message: "invalid auth_type, must be one of #{VALID_AUTH_TYPES.join(',')}"
   validates_presence_of :account_id
 
@@ -114,10 +114,8 @@ class AccountAuthorizationConfig < ActiveRecord::Base
 
   SENSITIVE_PARAMS = [].freeze
 
-  # will always be false unless some subclass wants to have a "Login With X"
-  # button on the login page
-  def login_button?
-    false
+  def self.login_button?
+    Rails.root.join("public/images/sso_buttons/sso-#{sti_name}.svg").exist?
   end
 
   def destroy
@@ -126,8 +124,9 @@ class AccountAuthorizationConfig < ActiveRecord::Base
     self.save!
     enable_canvas_authentication
     send_later_if_production(:soft_delete_pseudonyms)
+    true
   end
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
 
   def auth_password=(password)
     return if password.blank?
@@ -153,7 +152,29 @@ class AccountAuthorizationConfig < ActiveRecord::Base
 
   def self.serialization_excludes; [:auth_crypted_password, :auth_password_salt]; end
 
+  def provision_user(unique_id)
+    User.transaction(requires_new: true) do
+      pseudonym = account.pseudonyms.build
+      pseudonym.user = User.create!(name: unique_id, workflow_state: 'registered')
+      pseudonym.authentication_provider = self
+      pseudonym.unique_id = unique_id
+      pseudonym.save!
+      pseudonym
+    end
+  rescue ActiveRecord::RecordNotUnique
+    uncached do
+      pseudonyms.active.by_unique_id(unique_id).first!
+    end
+  end
+
+  protected
+
+  def statsd_prefix
+    "auth.account_#{Shard.global_id_for(account_id)}.config_#{self.global_id}"
+  end
+
   private
+
   def soft_delete_pseudonyms
     pseudonyms.find_each(&:destroy)
   end

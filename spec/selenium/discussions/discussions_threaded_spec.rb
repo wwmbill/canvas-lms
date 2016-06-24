@@ -2,6 +2,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../helpers/discussions_commo
 
 describe "threaded discussions" do
   include_context "in-process server selenium tests"
+  include DiscussionsCommon
 
   before(:each) do
     @topic_title = 'threaded discussion topic'
@@ -61,6 +62,28 @@ describe "threaded discussions" do
     expect(entry.reload.message).to match(edit_text)
   end
 
+  it "should not allow edits for a concluded student", priority: "2", test_id: 222526 do
+    student_enrollment = course_with_student(:course => @course, :user => @student, :active_enrollment => true)
+    entry = @topic.discussion_entries.create!(user: @student,
+                                              message: 'new threaded reply from student')
+    user_session(@student)
+    get "/courses/#{@course.id}/discussion_topics/#{@topic.id}"
+    student_enrollment.send("conclude")
+    get "/courses/#{@course.id}/discussion_topics/#{@topic.id}"
+    check_edit_entry(entry)
+  end
+
+  it "should not allow deletes for a concluded student", priority: "2", test_id: 222526 do
+    student_enrollment = course_with_student(:course => @course, :user => @student, :active_enrollment => true)
+    entry = @topic.discussion_entries.create!(user: @student,
+                                              message: 'new threaded reply from student')
+    user_session(@student)
+    get "/courses/#{@course.id}/discussion_topics/#{@topic.id}"
+    student_enrollment.send("conclude")
+    get "/courses/#{@course.id}/discussion_topics/#{@topic.id}"
+    check_delete_entry(entry)
+  end
+
   it "should allow edits to discussion with replies", priority: "1", test_id: 150513 do
     reply_depth = 3
     reply_depth.times { |i| @topic.discussion_entries.create!(user: @student,
@@ -93,6 +116,9 @@ describe "threaded discussions" do
   end
 
   it "should show a reply time that is different from the creation time", priority: "2", test_id: 113813 do
+    @enrollment.workflow_state = 'active'
+    @enrollment.save!
+
     # Reset discussion created_at time to two minutes ago
     @topic.update_attribute(:posted_at, Time.zone.now - 2.minute)
 
@@ -108,7 +134,7 @@ describe "threaded discussions" do
 
     edit_entry(reply, "Reply edited")
     reply.reload
-    edited_at = (reply[:updated_at].to_time.strftime('%b %-d at %-l:%M') << reply[:updated_at].to_time.strftime('%p').downcase).to_s
+    edited_at = reply[:updated_at].to_time.utc.strftime('%b %-d at %-l:%M%P')
     displayed_edited_at = f('.discussion-fyi').text
 
     # Verify displayed edit time includes object update time
@@ -116,7 +142,6 @@ describe "threaded discussions" do
 
     # Verify edit time is later than reply time
     expect(replied_at).to be < (edited_at)
-
   end
 
   it "should delete a reply", priority: "1", test_id: 150515 do
@@ -130,6 +155,7 @@ describe "threaded discussions" do
     entry = @topic.discussion_entries.create!(user: @student, message: "new threaded reply from student")
     get "/courses/#{@course.id}/discussion_topics/#{@topic.id}"
     edit_entry(entry, edit_text)
+    wait_for_ajaximations
     expect(f("#entry-#{entry.id} .discussion-fyi").text).to match("Edited by #{@teacher.name} on")
   end
 

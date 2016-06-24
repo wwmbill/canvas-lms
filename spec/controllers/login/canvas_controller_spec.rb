@@ -79,10 +79,13 @@ describe Login::CanvasController do
   end
 
   it "password auth should work" do
+    session[:sentinel] = true
     post 'create', :pseudonym_session => { :unique_id => 'jtfrd@instructure.com', :password => 'qwerty'}
     expect(response).to be_redirect
     expect(response).to redirect_to(dashboard_url(:login_success => 1))
     expect(assigns[:pseudonym_session].record).to eq @pseudonym
+    # session reset
+    expect(session[:sentinel]).to be_nil
   end
 
   it "password auth should work with extra whitespace around unique id " do
@@ -94,9 +97,11 @@ describe Login::CanvasController do
 
   it "should re-render if authenticity token is invalid and referer is not trusted" do
     controller.expects(:verify_authenticity_token).raises(ActionController::InvalidAuthenticityToken)
+    session[:sentinel] = true
     post 'create', :pseudonym_session => { :unique_id => ' jtfrd@instructure.com ', :password => 'qwerty' },
          :authenticity_token => '42'
     assert_status(400)
+    expect(session[:sentinel]).to eq true
     expect(response).to render_template(:new)
     expect(flash[:error]).to match(/invalid authenticity token/i)
   end
@@ -141,6 +146,30 @@ describe Login::CanvasController do
       post 'create', :pseudonym_session => { :unique_id => 'username', :password => 'password'}
       assert_status(400)
       expect(response).to render_template(:new)
+    end
+
+    it "doesn't query the server at all if the enabled features don't require it, and there is no matching login" do
+      ap = Account.default.authentication_providers.create!(auth_type: 'ldap')
+      ap.any_instantiation.expects(:ldap_bind_result).never
+      post 'create', :pseudonym_session => { :unique_id => 'username', :password => 'password'}
+      assert_status(400)
+      expect(response).to render_template(:new)
+    end
+
+    it "provisions automatically when enabled" do
+      ap = Account.default.authentication_providers.create!(auth_type: 'ldap', jit_provisioning: true)
+      ap.any_instantiation.expects(:ldap_bind_result).once.
+          with('username', 'password').
+          returns([{ 'uid' => ['12345'] }])
+      unique_id = 'username'
+      expect(Account.default.pseudonyms.active.by_unique_id(unique_id)).to_not be_exists
+
+      post 'create', :pseudonym_session => { :unique_id => 'username', :password => 'password'}
+      expect(response).to be_redirect
+      expect(response).to redirect_to(dashboard_url(:login_success => 1))
+
+      p = Account.default.pseudonyms.active.by_unique_id(unique_id).first!
+      expect(p.authentication_provider).to eq ap
     end
   end
 

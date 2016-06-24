@@ -3,8 +3,9 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/eportfolios_common')
 
 describe "eportfolios" do
   include_context "in-process server selenium tests"
+  include EportfoliosCommon
 
-  before (:each) do
+  before(:each) do
     course_with_student_logged_in
   end
 
@@ -49,6 +50,7 @@ describe "eportfolios" do
 
       get "/eportfolios/#{@eportfolio.id}"
       f('.manage_pages_link').click
+      wait_for_animations
       f('.add_page_link').click
       wait_for_ajaximations
       replace_content(f('#page_name'), page_title)
@@ -79,33 +81,34 @@ describe "eportfolios" do
     it "should edit ePortfolio settings", priority: "2", test_id: 220021 do
       get "/eportfolios/#{@eportfolio.id}"
       f('#section_list_manage .portfolio_settings_link').click
-      replace_content f('#edit_eportfolio_form #eportfolio_name'), "new ePortfolio name"
+      replace_content f('#edit_eportfolio_form #eportfolio_name'), "new ePortfolio name1"
       f('#edit_eportfolio_form #eportfolio_public').click
       submit_form('#edit_eportfolio_form')
       wait_for_ajax_requests
       @eportfolio.reload
-      expect(@eportfolio.name).to eq "new ePortfolio name"
+      expect(@eportfolio.name).to include_text("new ePortfolio name1")
     end
 
     it "should validate time stamp on ePortfolio", priority: "2" do
       # Freezes time to 2 days from today.
-      old_time = Timecop.freeze(Date.today + 2).utc
-      current_time = old_time.strftime('%b %-d at %-l') << old_time.strftime('%p').downcase
-      # Saves an entry to initiate an update.
-      @eportfolio_entry.save!
-      # Checks for correct time.
-      get "/dashboard/eportfolios"
-      expect(f(".updated_at")).to include_text(current_time)
+      old_time = 2.days.from_now.utc.beginning_of_hour
+      Timecop.freeze(old_time) do
+        current_time = old_time.strftime('%b %-d at %-l') << old_time.strftime('%p').downcase
+        # Saves an entry to initiate an update.
+        @eportfolio_entry.save!
+        # Checks for correct time.
+        get "/dashboard/eportfolios"
+        expect(f(".updated_at")).to include_text(current_time)
 
-      # Freezes time to 3 days from previous date.
-      new_time = Timecop.freeze(Date.today + 3).utc
-      current_time = new_time.strftime('%b %-d at %-l') << new_time.strftime('%p').downcase
-      # Saves to initiate an update.
-      @eportfolio_entry.save!
-      # Checks for correct time, then unfreezes time.
-      get "/dashboard/eportfolios"
-      expect(f(".updated_at")).to include_text(current_time)
-      Timecop.return
+        # Freezes time to 3 days from previous date.
+        new_time = Timecop.freeze(Date.today + 3).utc
+        current_time = new_time.strftime('%b %-d at %-l') << new_time.strftime('%p').downcase
+        # Saves to initiate an update.
+        @eportfolio_entry.save!
+        # Checks for correct time, then unfreezes time.
+        get "/dashboard/eportfolios"
+        expect(f(".updated_at")).to include_text(current_time)
+      end
     end
 
     it "should have a working flickr search dialog" do
@@ -179,7 +182,7 @@ describe "eportfolios" do
     end
 
     it "should be viewable with a shared link" do
-      destroy_session false
+      destroy_session
       get "/eportfolios/#{@eportfolio.id}?verifier=#{@eportfolio.uuid}"
       expect(f('#content h2').text).to eq "page"
     end
@@ -210,7 +213,8 @@ describe "eportfolios file upload" do
     wait_for_ajaximations
     driver.execute_script "$('.add_file_link').click()"
     fj(".file_upload:visible").send_keys(fullpath)
-    fj(".upload_file_button").click
+    wait_for_ajaximations
+    f(".upload_file_button").click
     wait_for_ajaximations
     submit_form(".form_content")
     wait_for_ajax_requests

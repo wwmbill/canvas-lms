@@ -53,7 +53,22 @@ def api_call(method, path, params, body_params = {}, headers = {}, opts = {})
   if opts[:expected_status]
     assert_status(opts[:expected_status])
   else
-    expect(response).to be_success, response.body
+    unless response.success?
+      error_message = response.body
+      begin
+        json = JSON.parse(response.body)
+        error_report_id = json['error_report_id']
+        error_report = ErrorReport.find_by(id: error_report_id) if error_report_id
+        if error_report
+          error_message << "\n"
+          error_message << error_report.message
+          error_message << "\n"
+          error_message << error_report.backtrace
+        end
+      rescue JSON::ParserError
+      end
+    end
+    expect(response).to be_success, error_message
   end
 
   if response.headers['Link']
@@ -117,7 +132,7 @@ def raw_api_call(method, path, params, body_params = {}, headers = {}, opts = {}
   path = path.sub(%r{\Ahttps?://[^/]+}, '') # remove protocol+host
   enable_forgery_protection do
     params_from_with_nesting(method, path).each do |key, value|
-      expect(params[key].to_s).to eq value.to_s
+      expect(params[key].to_s).to eq(value.to_s), lambda{ "Expected value of params[\'#{key}\'] to equal #{value}, actual: #{params[key]}"}
     end
     if @use_basic_auth
       user_session(@user)

@@ -3,11 +3,12 @@ require File.expand_path(File.dirname(__FILE__) + '/../../helpers/grading_scheme
 
 describe "sub account grading schemes" do
   include_context "in-process server selenium tests"
+  include GradingSchemesCommon
 
   let(:account) { Account.create(:name => 'sub account from default account', :parent_account => Account.default) }
   let(:url) { "/accounts/#{account.id}/grading_standards" }
 
-  before (:each) do
+  before(:each) do
     course_with_admin_logged_in
     get url
   end
@@ -31,21 +32,21 @@ describe "sub account grading schemes" do
       it 'should disable add grading scheme button during update', priority: "2", test_id: 164232 do
         simple_grading_standard(account)
         get url
-        f('.edit_grading_standard_link').click
-        expect(f('#react_grading_tabs .add_standard_link')).to have_class('disabled')
+        f('.edit_grading_standard_button').click
+        expect(f('#react_grading_tabs .add_standard_button')).to have_class('disabled')
       end
 
       it 'should disable other grading schemes from being edited', priority: "2", test_id: 307626 do
-        2.times do 
+        2.times do
           simple_grading_standard(account)
         end
         get url
-        f('.edit_grading_standard_link').click
-        expect(f('.disabled-links')).to be_truthy
+        f('.edit_grading_standard_button').click
+        expect(f('.disabled-buttons')).to be_truthy
       end
 
       it 'should allow all available grading schemes to be edited on page load', priority: "2", test_id: 310145 do
-        2.times do 
+        2.times do
           simple_grading_standard(account)
         end
         get url

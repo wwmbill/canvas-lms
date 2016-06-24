@@ -38,6 +38,7 @@ define [
       'click .delete_assignment': 'onDelete'
       'click .tooltip_link': preventDefault ->
       'keydown': 'handleKeys'
+      'click .post-to-sis-status': 'togglePostToSIS'
 
     messages:
       confirm: I18n.t('confirms.delete_assignment', 'Are you sure you want to delete this assignment?')
@@ -68,7 +69,11 @@ define [
       @moveAssignmentView = false
 
       if @canManage()
-        @publishIconView    = new PublishIconView(model: @model)
+        @publishIconView    = new PublishIconView({
+          model: @model,
+          publishText: I18n.t("Unpublished. Click to publish %{name}", name: @model.get('name')),
+          unpublishText: I18n.t("Published. Click to unpublish %{name}", name: @model.get('name'))
+        })
         @editAssignmentView = new CreateAssignmentView(model: @model)
         @moveAssignmentView = new MoveDialogView
           model: @model
@@ -261,6 +266,27 @@ define [
 
     editItem: =>
       @$("#assignment_#{@model.id}_settings_edit_item").click()
+
+    togglePostToSIS: (e) =>
+      c = @model.postToSIS()
+      @model.postToSIS(!c)
+      e.preventDefault()
+      $t = $(e.currentTarget)
+      @model.save({}, {
+        success: =>
+          if c
+            $t.removeClass('post-to-sis-status enabled')
+            $t.addClass('post-to-sis-status disabled')
+            $t.find('.icon-post-to-sis').prop('title', I18n.t("Post grade to SIS disabled. Click to toggle."))
+                                        .prop('src', '/images/svg-icons/svg_icon_post_to_sis.svg')
+            $t.find('.screenreader-only').text(I18n.t("The grade for this assignment will not sync to the student information system. Click here to toggle this setting."))
+          else
+            $t.removeClass('post-to-sis-status disabled')
+            $t.addClass('post-to-sis-status enabled')
+            $t.find('.icon-post-to-sis').prop('title', I18n.t("Post grade to SIS enabled. Click to toggle."))
+                                        .prop('src', '/images/svg-icons/svg_icon_post_to_sis_active.svg')
+            $t.find('.screenreader-only').text(I18n.t("The grade for this assignment will sync to the student information system. Click here to toggle this setting."))
+      })
 
     deleteItem: =>
       @$("#assignment_#{@model.id}_settings_delete_item").click()

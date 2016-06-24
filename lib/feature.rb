@@ -17,7 +17,8 @@
 #
 
 class Feature
-  ATTRS = [:feature, :display_name, :description, :applies_to, :state, :root_opt_in, :enable_at, :beta, :development, :release_notes_url, :custom_transition_proc, :after_state_change_proc]
+  ATTRS = [:feature, :display_name, :description, :applies_to, :state, :root_opt_in, :enable_at, :beta, :development,
+    :release_notes_url, :custom_transition_proc, :after_state_change_proc, :autoexpand]
   attr_reader *ATTRS
 
   def initialize(opts = {})
@@ -40,7 +41,7 @@ class Feature
     true
   end
 
-  def locked?(query_context, current_user = nil)
+  def locked?(query_context)
     query_context.blank? || !allowed? && !hidden?
   end
 
@@ -126,30 +127,30 @@ This enables an updated navigation, new dashboard and a simpler, more modern loo
 END
       applies_to: 'RootAccount',
       state: 'allowed',
+      root_opt_in: true
+    },
+    'epub_export' =>
+    {
+      display_name: -> { I18n.t('ePub Exporting') },
+      description: -> { I18n.t(<<END) },
+      This enables users to generate and download course ePub.
+END
+      applies_to: 'Course',
+      state: 'allowed',
       root_opt_in: true,
       beta: true
     },
-    'html5_first_videos' =>
-    {
-      display_name: -> { I18n.t('features.html5_first_videos', 'Prefer HTML5 for video playback') },
-      description: -> { I18n.t('html5_first_videos_description', <<-END) },
-By default, Canvas will try to use Flash first to play videos. Turn this on to try using HTML5 first,
-then fall back to Flash.
-END
-      applies_to: 'RootAccount',
-      state: 'on',
-      beta: false
-    },
     'high_contrast' =>
     {
-      display_name: -> { I18n.t('features.high_contrast', 'Use High Contrast Styles') },
+      display_name: -> { I18n.t('features.high_contrast', 'High Contrast UI') },
       description: -> { I18n.t('high_contrast_description', <<-END) },
-If you would prefer a higher-contrast version of the Canvas user interface, enable this.
-This might be useful for people with impaired vision or difficulty reading.
+High Contrast enhances the color contrast of the UI (text, buttons, etc.), making those items more
+distinct and easier to identify. Note: Institution branding will be disabled.
 END
       applies_to: 'User',
       state: 'allowed',
-      beta: true
+      beta: true,
+      autoexpand: true
     },
     'outcome_gradebook' =>
     {
@@ -192,7 +193,7 @@ END
     },
     'k12' =>
     {
-      display_name: -> { I18n.t('features.k12', 'K-12 specific features') },
+      display_name: -> { I18n.t('features.k12', 'K-12 Specific Features') },
       description:  -> { I18n.t('k12_description', <<-END) },
 Features, settings and styles that make more sense specifically in a K-12 environment. For now, this only
 applies some style changes, but more K-12 specific things may be added in the future.
@@ -210,28 +211,6 @@ END
       state: 'hidden',
       root_opt_in: true,
       beta: true
-    },
-    'student_groups_next' =>
-    {
-      display_name: -> { I18n.t('features.student_groups', 'New Student Groups Page') },
-      description:  -> { I18n.t('student_groups_desc', <<-END) },
-This enables the new student group page for an account. The new page was build to provide a more dynamic group signup
-experience.
-END
-      applies_to: 'RootAccount',
-      state: 'on'
-    },
-    'better_file_browsing' =>
-    {
-      display_name: -> { I18n.t('features.better_file_browsing', 'Better File Browsing') },
-      description:  -> { I18n.t('better_file_browsing_description', <<-END) },
-A new, simpler, more user friendly file browsing interface.  If you turn this on at the course level,
-then all of the users in that course will see the new interface.  To get it to show up when someone
-goes to the personal files page for a user ('/files') then you need to turn it on for the account they are a member of.
-END
-
-      applies_to: 'Course',
-      state: 'on'
     },
     'allow_opt_out_of_inbox' =>
     {
@@ -302,17 +281,17 @@ END
       state: 'hidden',
       root_opt_in: true
     },
-    'lti2_ui' =>
-      {
-        display_name: -> { I18n.t('Show LTI 2 Configuration UI') },
-        description: -> { I18n.t('If enabled, users will be able to configure LTI 2 tools.') },
-        applies_to: 'RootAccount',
+    'lti2_rereg' =>
+    {
+        display_name: -> {I18n.t('LTI 2 Reregistration')},
+        description: -> { I18n.t('Enable reregistration for LTI 2 ')},
+        applies_to:'RootAccount',
         state: 'hidden',
         beta: true
-      },
+    },
     'quizzes_lti' =>
       {
-        display_name: -> { I18n.t('Quiz LTI plugin') },
+        display_name: -> { I18n.t('Quiz LTI Plugin') },
         description: -> { I18n.t('Use the new quiz LTI tool in place of regular canvas quizzes') },
         applies_to: 'Course',
         state: 'hidden',
@@ -321,7 +300,7 @@ END
       },
     'disable_lti_post_only' =>
       {
-        display_name: -> { I18n.t('Don\'t move LTI query params to POST body') },
+        display_name: -> { I18n.t('Don\'t Move LTI Query Params to POST Body') },
         description: -> { I18n.t('If enabled, query parameters will not be copied to the POST body during an LTI launch.') },
         applies_to: 'RootAccount',
         state: 'hidden',
@@ -337,33 +316,36 @@ END
           root_opt_in: true,
           beta: true
       },
-    'nc_or' =>
-        {
-            display_name: -> { I18n.t('Enable "OR" Condition for Modules') },
-            description:  -> { I18n.t('If enabled, modules will have the option to be marked as complete when only one of the requirements is met.') },
-            applies_to: 'Course',
-            state: 'hidden_in_prod',
-            development: false,
-            root_opt_in: true
-        },
+    'notification_service' =>
+    {
+      display_name: -> { I18n.t('Use remote service for notifications') },
+      description: -> { I18n.t('Allow the ability to send notifications through our dispatch queue') },
+      applies_to: 'RootAccount',
+      state: 'hidden',
+      beta: true,
+      development: false,
+      root_opt_in: false
+    },
     'use_new_tree' =>
     {
-      display_name: -> { I18n.t('Use new folder tree in Files')},
+      display_name: -> { I18n.t('Use New Folder Tree in Files')},
       description: -> {I18n.t('Replaces the current folder tree with a new accessible and more feature rich folder tree.')},
       applies_to: 'Course',
       state: 'hidden',
       development: true,
       root_opt_in: true
     },
-    'moderated_grading' => {
-      display_name: -> { I18n.t('Moderated Grading') },
-      description: -> { I18n.t('Moderated Grading allows multiple graders to grade selected assignments independently, with a moderator providing the final grade.') },
+    'course_card_images' =>
+    {
+      display_name: -> { I18n.t('Enable Dashboard Images for Courses')},
+      description: -> {I18n.t('Allow course images to be assigned to a course and used on the dashcards.')},
       applies_to: 'Course',
       state: 'hidden',
       development: true,
-      root_opt_in: true
+      root_opt_in: true,
+      beta: true
     },
-      'gradebook_performance' => {
+    'gradebook_performance' => {
       display_name: -> { I18n.t('Gradebook Performance') },
       description: -> { I18n.t('Performance enhancements for the Gradebook') },
       applies_to: 'Course',
@@ -371,22 +353,82 @@ END
       development: true,
       root_opt_in: true
     },
-    'anonymous_grading' =>
-    {
+    'anonymous_grading' => {
       display_name: -> { I18n.t('Anonymous Grading') },
       description: -> { I18n.t("Anonymous grading forces student names to be hidden in SpeedGrader™") },
       applies_to: 'Course',
-      state: 'hidden',
-      development: true,
-      root_opt_in: true,
+      state: 'allowed'
     },
     'international_sms' => {
       display_name: -> { I18n.t('International SMS') },
       description: -> { I18n.t('Allows users with international phone numbers to receive text messages from Canvas.') },
       applies_to: 'RootAccount',
       state: 'hidden',
-      root_opt_in: true,
-      development: true
+      root_opt_in: true
+    },
+    'all_grading_periods_totals' =>
+    {
+      display_name: -> { I18n.t('Display Totals for "All Grading Periods"') },
+      description: -> { I18n.t('Display total grades when the "All Grading Periods" dropdown option is selected (Multiple Grading Periods must be enabled).') },
+      applies_to: 'Course',
+      state: 'allowed',
+      root_opt_in: true
+    },
+    'course_user_search' => {
+      display_name: -> { I18n.t('Course and User Search') },
+      description: -> { I18n.t('Updated UI for searching and displaying users and courses within an account.') },
+      applies_to: 'Account',
+      state: 'hidden',
+      development: true,
+      root_opt_in: true
+    },
+    'rich_content_service' =>
+    {
+      display_name: -> { I18n.t('Use remote version of Rich Content Editor') },
+      description: -> { I18n.t('In cases where it is available, load the RCE from a canvas rich content service') },
+      applies_to: 'RootAccount',
+      state: 'allowed',
+      beta: true,
+      development: false,
+      root_opt_in: false
+    },
+    'rich_content_service_with_sidebar' =>
+    {
+      display_name: -> { I18n.t('Use remote version of Rich Content Editor AND sidebar') },
+      description: -> { I18n.t('In cases where it is available, load the RCE and the wiki sidebar from a canvas rich content service') },
+      applies_to: 'RootAccount',
+      state: 'hidden',
+      beta: true,
+      development: false,
+      root_opt_in: false
+    },
+    'rich_content_service_high_risk' =>
+    {
+      display_name: -> { I18n.t('Use remote version of Rich Content Editor AND sidebar in high-risk areas like quizzes') },
+      description: -> { I18n.t('Always load the RCE and Sidebar from a canvas rich content service everywhere') },
+      applies_to: 'RootAccount',
+      state: 'hidden',
+      beta: true,
+      development: false,
+      root_opt_in: false
+    },
+    'conditional_release' =>
+    {
+      display_name: -> { I18n.t('Conditional Release') },
+      description: -> { I18n.t('Configure individual learning paths for students based on assessment results.') },
+      applies_to: 'Course',
+      state: 'hidden',
+      beta: true,
+      development: true,
+      root_opt_in: false,
+    },
+    'wrap_calendar_event_titles' =>
+    {
+      display_name: -> { I18n.t('Wrap event titles in Calendar month view') },
+      description: -> { I18n.t("Show calendar events in the month view on multiple lines if the title doesn't fit on a single line") },
+      applies_to: 'RootAccount',
+      state: 'allowed',
+      root_opt_in: true
     }
   )
 
@@ -459,4 +501,3 @@ end
 
 # load feature definitions
 Dir.glob("#{Rails.root}/lib/features/*.rb").each { |file| require_dependency file }
-

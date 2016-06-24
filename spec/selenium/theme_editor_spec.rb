@@ -4,6 +4,8 @@ require File.expand_path(File.dirname(__FILE__) + '/helpers/color_common')
 
 describe 'Theme Editor' do
   include_context 'in-process server selenium tests'
+  include ColorCommon
+  include ThemeEditorCommon
 
   before(:each) do
     course_with_admin_logged_in
@@ -118,6 +120,7 @@ describe 'Theme Editor' do
   end
 
   it 'should have validation for every text field', priority: "2", test_id: 241992 do
+    skip_if_firefox('Broken after upgrade to webdriver 2.53 - seems to be a timing issue on jenkins, passes locally')
     open_theme_editor(Account.default.id)
 
     # input invalid text into every text field

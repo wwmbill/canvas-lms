@@ -1,3 +1,4 @@
+<% if can_do(@user, @current_user, :manage, :manage_user_details) %>
   <% css_bundle :user_logins %>
   <% js_bundle :user_logins %>
   <% js_env :PASSWORD_POLICY => (@domain_root_account.try(:password_policy) || {}) %>
@@ -8,10 +9,10 @@
       <% pseudonyms.each do |pseudonym| %>
         <tr class='login <%= 'blank' unless pseudonym %>' style="<%= hidden unless pseudonym %>">
           <td class='sso-icon'>
-            <% if pseudonym.try(:authentication_provider).try(:login_button?) %>
+            <% if lookup_context.template_exists?("shared/svg/_svg_icon_#{pseudonym.try(:authentication_provider).try(:auth_type)}.svg") %>
               <%= render(partial: "shared/svg/svg_icon_#{pseudonym.authentication_provider.auth_type}.svg") %>
               <span class="screenreader-only">
-                <%= t("This login is for %{provider}", provider: pseudonym.authentication_provider.auth_type) %>
+                <%= t("This login is for %{provider}", provider: pseudonym.authentication_provider.class.display_name) %>
               </span>
             <% end %>
           </td>
@@ -98,7 +99,12 @@
         <tr class="account_id">
           <td><%= f.blabel :account_id, :en => "Account" %></td>
           <td>
-            <% accounts = Account.root_accounts.active.map{|a| [a.name, a.id] }.sort_by(&:first) %>
+            <%
+              accounts = Account.root_accounts
+                .active
+                .map { |a| [(a.name || t("Unnamed Account (%{id})", id: a.id)), a.id] }
+                .sort_by(&:first)
+            %>
             <%= f.select :account_id, accounts, {:selected => @domain_root_account.id}, :class => "account_id_select" %>
           </td>
         </tr>
@@ -136,3 +142,4 @@
       <button type="submit" class="btn btn-primary submit_button"><%= t('buttons.update_login', 'Update Login') %></button>
     </div>
   <% end %>
+<% end %>

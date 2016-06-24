@@ -30,10 +30,10 @@ define [
 
   buildAssignment1 = ->
     date1 =
-      "due_at": new Date("August 28, 2013").toISOString()
+      "due_at": new Date("2103-08-28T00:00:00").toISOString()
       "title":"Summer Session"
     date2 =
-      "due_at": new Date("August 28, 2013").toISOString()
+      "due_at": new Date("2103-08-28T00:00:00").toISOString()
       "title":"Winter Session"
 
     buildAssignment(
@@ -244,6 +244,25 @@ define [
     equal errors["name"].length, 1
     equal errors["name"][0]["message"], "Name is required!"
 
+  test "requires a name < 255 chars to save assignment", ->
+    view = createView(@assignment3)
+    l1 = 'aaaaaaaaaa'
+    l2 = l1 + l1 + l1 + l1 + l1 + l1
+    l3 = l2 + l2 + l2 + l2 + l2 + l2
+    ok l3.length > 255
+
+    errors = view.validateBeforeSave(name: l3, [])
+    ok errors["name"]
+    equal errors["name"].length, 1
+    equal errors["name"][0]["message"], "Name is too long"
+
+  test "don't validate name if it is frozen", ->
+    view = createView(@assignment3)
+    @assignment3.set('frozen_attributes', ['title'])
+
+    errors = view.validateBeforeSave({}, [])
+    ok !errors["name"]
+
   test 'rejects a letter for points_possible', ->
     view = createView(@assignment3)
     data =
@@ -295,7 +314,7 @@ define [
     equal errors['due_at'][0]['message'], 'Due date cannot be before unlock date'
 
   test "renders due dates with locale-appropriate format string", ->
-    tz.changeLocale(french, 'fr_FR')
+    tz.changeLocale(french, 'fr_FR', 'fr')
     I18nStubber.setLocale 'fr_FR'
     I18nStubber.stub 'fr_FR',
       'date.formats.short': '%-d %b'

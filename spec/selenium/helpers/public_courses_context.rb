@@ -2,11 +2,11 @@ require File.expand_path(File.dirname(__FILE__) + '/../common')
 
 shared_context "public course as a logged out user" do
   def ensure_logged_out
-    destroy_session(true)
+    destroy_session
   end
 
   def validate_selector_displayed(selector)
-    expect(f(selector)).to be_displayed
+    expect(f(selector)).to be_truthy
   end
 
   let!(:public_course) do

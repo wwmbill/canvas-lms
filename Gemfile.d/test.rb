@@ -1,6 +1,5 @@
 group :test do
   gem 'testingbot', require: false
-  gem 'testbot', github: 'smeredith0506/testbot', branch: 'master', ref: '47fbf057ab40f8a6e24b1ae780c3f1a176621892'
   gem 'simplecov', '0.9.2', require: false
     gem 'docile', '1.1.3', require: false
   gem 'simplecov-rcov', '0.2.3', require: false
@@ -26,17 +25,24 @@ group :test do
   gem 'once-ler', '0.0.15'
 
   gem 'sequel', '4.5.0', require: false
-  gem 'selenium-webdriver', '2.46.2'
+  gem 'selenium-webdriver', '2.53.0'
     gem 'childprocess', '0.5.0', require: false
     gem 'websocket', '1.0.7', require: false
   gem 'selinimum', '0.0.1', require: false, path: 'gems/selinimum'
-  gem 'appium_lib', '7.0.0', require: false
-  gem 'test_after_commit', '0.4.0'
-  gem 'test-unit', '~> 3.0', require: false, platform: :ruby_22
-  gem 'webmock', '1.16.1', require: false
-    gem 'addressable', '2.3.5', require: false
-    gem 'crack', '0.4.1', require: false
+  gem 'test_after_commit', '0.4.2'
+  gem 'testrailtagging', '~> 0.3.1', git: 'https://github.com/instructure/testrailtagging', ref: '002c483ad2f0d2a288c96bde30ff70ed92f1fa50', require: false
+
+  gem 'webmock', '1.22.3', require: false
+    gem 'addressable', '2.3.8', require: false
+    gem 'crack', '0.4.3', require: false
   gem 'yard', '0.8.7.6'
   gem 'yard-appendix', '>=0.1.8'
   gem 'timecop', '0.6.3'
+  gem 'jira_ref_parser', '1.0.0'
+  gem 'headless', '2.2.0', require: false
+  gem 'escape_code', '0.2'
+
+  unless CANVAS_RAILS4_0
+    gem 'rails-dom-testing', '1.0.7'
+  end
 end

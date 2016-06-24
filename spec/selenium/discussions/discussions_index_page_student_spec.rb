@@ -2,6 +2,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../helpers/discussions_commo
 
 describe "discussions" do
   include_context "in-process server selenium tests"
+  include DiscussionsCommon
 
   let(:course) { course_model.tap{|course| course.offer!} }
   let(:new_section) { course.course_sections.create!(name: "section 2") }
@@ -103,6 +104,7 @@ describe "discussions" do
           teacher_topic.require_initial_post = true
           teacher_topic.save!
           get url
+          wait_for_subscription_icon_to_load("icon-discussion")
           expect(f('.icon-discussion')).to be_displayed
           f('.subscription-toggler').click
           wait_for_ajaximations
@@ -121,10 +123,12 @@ describe "discussions" do
           get url
           wait_for_ajaximations
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})
+          wait_for_subscription_icon_to_load("icon-discussion")
           expect(f('.icon-discussion')).to be_displayed
           f('.subscription-toggler').click
           wait_for_ajaximations
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})
+          wait_for_subscription_icon_to_load("icon-discussion-check")
           expect(f('.icon-discussion-check')).to be_displayed
           expect(teacher_topic.reload.subscribed?(student)).to be_truthy
         end
@@ -134,12 +138,14 @@ describe "discussions" do
           get url
           wait_for_ajaximations
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})
+          wait_for_subscription_icon_to_load("icon-discussion-check")
           expect(f('.icon-discussion-check')).to be_displayed
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseenter')})
           expect(f('.icon-discussion-check')).to be_nil
           expect(f('.icon-discussion-x')).to be_displayed
           f('.subscription-toggler').click
           wait_for_ajaximations
+          wait_for_subscription_icon_to_load("icon-discussion")
           expect(f('.icon-discussion-x')).to be_nil
           expect(f('.icon-discussion')).to be_displayed
           driver.execute_script(%{$('.subscription-toggler').trigger('mouseleave')})

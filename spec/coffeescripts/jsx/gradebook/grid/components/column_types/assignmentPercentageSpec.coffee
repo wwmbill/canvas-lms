@@ -9,26 +9,33 @@ define [
   wrapper   = document.getElementById('fixtures')
 
   renderComponent = (data) ->
-    componentFactory = React.createFactory(AssignmentPercentage)
-    React.render(componentFactory(data), wrapper)
+    element = React.createElement(AssignmentPercentage, data)
+    React.render(element, wrapper)
 
   buildComponent = (props, additionalProps) ->
-    cellData = props || {submission: {}, cellData: {id: '1'}, rowData: {enrollment: {}}}
+    cellData = props || {
+      rowData: {
+        student: {
+          enrollment_state: "active"
+        }
+      }
+    }
     $.extend(cellData, additionalProps)
     renderComponent(cellData)
 
   buildComponentWithSubmission = (additionalProps) ->
     cellData =
-      cellData: {id: '1'}
-      submission: {id: '1', grade: '100%', assignment_id: '1'}
+      cellData: {id: '1', grade: '100%', assignment_id: '1'}
+      rowData: {
+        student: {
+          enrollment_state: "active"
+        }
+      }
     $.extend(cellData, additionalProps)
     buildComponent(cellData)
 
   module 'ReactGradebook.assignmentPercentageComponent',
     setup: ->
-      #url = '/api/v1/courses/7/assignments/1/submissions/1?include%5B%5D=visibility'
-      #ENV.GRADEBOOK_OPTIONS = {change_grade_url: url}
-
     teardown: ->
       React.unmountComponentAtNode wrapper
 
